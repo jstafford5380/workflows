@@ -316,7 +316,7 @@ public sealed class InstanceRepository : IInstanceRepository
 
             if (instance is not null && instance.Status == WorkflowInstanceStatus.Running.ToString())
             {
-                instance.Status = WorkflowInstanceStatus.Canceled.ToString();
+                instance.Status = WorkflowInstanceStatus.Failed.ToString();
                 instance.UpdatedAt = now;
             }
 

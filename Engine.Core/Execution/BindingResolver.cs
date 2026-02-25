@@ -16,7 +16,7 @@ public static class BindingResolver
             BindingSource.InstanceId => JsonValue.Create(instanceId.ToString())!,
             BindingSource.Inputs => ResolveInput(binding.InputKey!, workflowInputs),
             BindingSource.StepOutput => ResolveStepOutput(binding.StepId!, binding.OutputKey!, stepOutputs),
-            _ => throw new InvalidOperationException($"Unsupported binding source '{binding.Source}'.")
+            _ => throw new WorkflowRuntimeValidationException($"Unsupported binding source '{binding.Source}'.")
         };
     }
 
@@ -38,7 +38,8 @@ public static class BindingResolver
 
             if (!BindingReference.TryParse(inputValue.Binding!, out var binding, out var error))
             {
-                throw new InvalidOperationException(error);
+                throw new WorkflowRuntimeValidationException(
+                    $"Step '{step.StepId}' has an invalid binding for input '{inputName}': {error}");
             }
 
             result[inputName] = ResolveBinding(binding!, instanceId, workflowInputs, stepOutputs);
@@ -51,12 +52,12 @@ public static class BindingResolver
     {
         if (!BindingReference.TryParse(expression, out var binding, out var error))
         {
-            throw new InvalidOperationException(error);
+            throw new WorkflowRuntimeValidationException($"Invalid wait-for-event correlation binding: {error}");
         }
 
         if (binding!.Source == BindingSource.StepOutput)
         {
-            throw new InvalidOperationException("WaitForEvent correlation key cannot reference step outputs in v1.");
+            throw new WorkflowRuntimeValidationException("Wait-for-event correlation key cannot reference step outputs in v1.");
         }
 
         var node = ResolveBinding(binding, instanceId, workflowInputs, new Dictionary<string, JsonObject>());
@@ -67,7 +68,7 @@ public static class BindingResolver
     {
         if (!workflowInputs.TryGetPropertyValue(key, out var node))
         {
-            throw new InvalidOperationException($"Workflow input '{key}' was not provided.");
+            throw new WorkflowRuntimeValidationException($"Missing required workflow input '{key}'.");
         }
 
         return node?.DeepClone() ?? JsonValue.Create((string?)null)!;
@@ -77,12 +78,14 @@ public static class BindingResolver
     {
         if (!stepOutputs.TryGetValue(stepId, out var outputs))
         {
-            throw new InvalidOperationException($"Referenced step '{stepId}' has no outputs.");
+            throw new WorkflowRuntimeValidationException(
+                $"Missing output source step '{stepId}'. Ensure the step completed successfully before dependent steps run.");
         }
 
         if (!outputs.TryGetPropertyValue(outputKey, out var value))
         {
-            throw new InvalidOperationException($"Referenced output '{stepId}.{outputKey}' is missing.");
+            throw new WorkflowRuntimeValidationException(
+                $"Missing required output '{outputKey}' from step '{stepId}'.");
         }
 
         return value?.DeepClone() ?? JsonValue.Create((string?)null)!;

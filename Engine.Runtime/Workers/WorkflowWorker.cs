@@ -215,6 +215,25 @@ public sealed class WorkflowWorker : BackgroundService
 
             await HandleFailureAsync(instanceRepository, payload, claimedStep, "Step timed out.", true, CancellationToken.None);
         }
+        catch (WorkflowRuntimeValidationException ex)
+        {
+            _logger.LogWarning(
+                "Runtime validation failed for {InstanceId}/{StepId}: {Message}",
+                payload.InstanceId,
+                payload.StepId,
+                ex.Message);
+
+            await instanceRepository.SaveStepExecutionLogAsync(
+                payload.InstanceId,
+                claimedStep.StepId,
+                claimedStep.Attempt,
+                false,
+                $"Input validation failed before activity execution.{Environment.NewLine}Details: {ex.Message}",
+                _clock.UtcNow,
+                CancellationToken.None);
+
+            await HandleFailureAsync(instanceRepository, payload, claimedStep, ex.Message, false, CancellationToken.None);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Step execution failed for {InstanceId}/{StepId}", payload.InstanceId, payload.StepId);

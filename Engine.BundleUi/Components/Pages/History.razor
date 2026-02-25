@@ -1,0 +1,532 @@
+@page "/history"
+@using Engine.BundleUi.Models
+@using Engine.BundleUi.Services
+@inject BundleApiClient BundleApiClient
+
+<PageTitle>Run History</PageTitle>
+
+<div class="history-shell">
+    <section class="hero">
+        <h1>Workflow Run History</h1>
+        <p>Browse workflow runs and inspect step-level execution logs.</p>
+    </section>
+
+    <section class="panel">
+        <div class="panel-header">
+            <h2>In Progress</h2>
+            <button class="btn-secondary" @onclick="RefreshRunsAsync" disabled="@IsLoadingRuns">
+                <span class="btn-icon" aria-hidden="true">↻</span>
+                <span>Refresh</span>
+            </button>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(RunsErrorMessage))
+        {
+            <div class="alert error">@RunsErrorMessage</div>
+        }
+        else if (InProgressRuns.Count == 0)
+        {
+            <p>No in-progress runs.</p>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>Instance</th>
+                        <th>Workflow</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                        <th>Updated</th>
+                        <th>Action</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var run in InProgressRuns)
+                    {
+                        var runExpanded = ExpandedRunIds.Contains(run.InstanceId);
+                        var isLoadingRunDetail = LoadingRunDetailInstanceIds.Contains(run.InstanceId);
+                        var isCanceling = CancelingRunInstanceIds.Contains(run.InstanceId);
+
+                        <tr class="run-row">
+                            <td><code>@run.InstanceId</code></td>
+                            <td><strong>@($"{run.WorkflowName} v{run.WorkflowVersion}")</strong></td>
+                            <td><span class="status-pill @StatusClass(run.Status)">@run.Status</span></td>
+                            <td>@run.CreatedAt.LocalDateTime</td>
+                            <td>@run.UpdatedAt.LocalDateTime</td>
+                            <td>
+                                <div class="action-buttons">
+                                    <button
+                                        class="btn-secondary"
+                                        @onclick="() => ToggleRunAsync(run.InstanceId)"
+                                        disabled="@(IsLoadingRuns || isLoadingRunDetail)">
+                                        <span class="btn-icon" aria-hidden="true">@(runExpanded ? "▾" : "▸")</span>
+                                        <span>@(runExpanded ? "Collapse" : "Expand")</span>
+                                    </button>
+                                    <button
+                                        class="btn-secondary"
+                                        @onclick="() => RefreshRunAsync(run.InstanceId)"
+                                        disabled="@(IsLoadingRuns || isLoadingRunDetail)">
+                                        <span class="btn-icon" aria-hidden="true">↻</span>
+                                        <span>Refresh</span>
+                                    </button>
+                                    <button
+                                        class="btn-danger"
+                                        @onclick="() => CancelRunAsync(run.InstanceId)"
+                                        disabled="@isCanceling">
+                                        <span class="btn-icon" aria-hidden="true">■</span>
+                                        <span>@(isCanceling ? "Stopping..." : "Stop")</span>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+
+                        @if (runExpanded)
+                        {
+                            <tr class="expanded-row">
+                                <td colspan="6">
+                                    @if (isLoadingRunDetail)
+                                    {
+                                        <p>Loading run details...</p>
+                                    }
+                                    else if (RunDetailErrors.TryGetValue(run.InstanceId, out var detailError) && !string.IsNullOrWhiteSpace(detailError))
+                                    {
+                                        <div class="alert error">@detailError</div>
+                                    }
+                                    else if (RunDetailsByInstanceId.TryGetValue(run.InstanceId, out var runDetail))
+                                    {
+                                        @RunDetailsMarkup(runDetail)
+                                    }
+                                    else
+                                    {
+                                        <p>Run details unavailable.</p>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+
+    <section class="panel">
+        <div class="panel-header">
+            <h2>History</h2>
+            <button class="btn-secondary" @onclick="RefreshRunsAsync" disabled="@IsLoadingRuns">
+                <span class="btn-icon" aria-hidden="true">↻</span>
+                <span>Refresh</span>
+            </button>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(RunsErrorMessage))
+        {
+            <div class="alert error">@RunsErrorMessage</div>
+        }
+        else if (HistoryRuns.Count == 0)
+        {
+            <p>No completed runs.</p>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>Instance</th>
+                        <th>Workflow</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                        <th>Updated</th>
+                        <th>Action</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var run in HistoryRuns)
+                    {
+                        var runExpanded = ExpandedRunIds.Contains(run.InstanceId);
+                        var isLoadingRunDetail = LoadingRunDetailInstanceIds.Contains(run.InstanceId);
+
+                        <tr class="run-row">
+                            <td><code>@run.InstanceId</code></td>
+                            <td><strong>@($"{run.WorkflowName} v{run.WorkflowVersion}")</strong></td>
+                            <td><span class="status-pill @StatusClass(run.Status)">@run.Status</span></td>
+                            <td>@run.CreatedAt.LocalDateTime</td>
+                            <td>@run.UpdatedAt.LocalDateTime</td>
+                            <td>
+                                <div class="action-buttons">
+                                    <button
+                                        class="btn-secondary"
+                                        @onclick="() => ToggleRunAsync(run.InstanceId)"
+                                        disabled="@(IsLoadingRuns || isLoadingRunDetail)">
+                                        <span class="btn-icon" aria-hidden="true">@(runExpanded ? "▾" : "▸")</span>
+                                        <span>@(runExpanded ? "Collapse" : "Expand")</span>
+                                    </button>
+                                    <button
+                                        class="btn-secondary"
+                                        @onclick="() => RefreshRunAsync(run.InstanceId)"
+                                        disabled="@(IsLoadingRuns || isLoadingRunDetail)">
+                                        <span class="btn-icon" aria-hidden="true">↻</span>
+                                        <span>Refresh</span>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+
+                        @if (runExpanded)
+                        {
+                            <tr class="expanded-row">
+                                <td colspan="6">
+                                    @if (isLoadingRunDetail)
+                                    {
+                                        <p>Loading run details...</p>
+                                    }
+                                    else if (RunDetailErrors.TryGetValue(run.InstanceId, out var detailError) && !string.IsNullOrWhiteSpace(detailError))
+                                    {
+                                        <div class="alert error">@detailError</div>
+                                    }
+                                    else if (RunDetailsByInstanceId.TryGetValue(run.InstanceId, out var runDetail))
+                                    {
+                                        @RunDetailsMarkup(runDetail)
+                                    }
+                                    else
+                                    {
+                                        <p>Run details unavailable.</p>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+</div>
+
+@code {
+    private IReadOnlyList<WorkflowInstanceSummary> WorkflowRuns { get; set; } = [];
+
+    private bool IsLoadingRuns { get; set; }
+
+    private string? RunsErrorMessage { get; set; }
+
+    private HashSet<Guid> ExpandedRunIds { get; } = [];
+
+    private HashSet<Guid> LoadingRunDetailInstanceIds { get; } = [];
+
+    private HashSet<Guid> CancelingRunInstanceIds { get; } = [];
+
+    private Dictionary<Guid, WorkflowInstanceChecklist> RunDetailsByInstanceId { get; } = [];
+
+    private Dictionary<Guid, string> RunDetailErrors { get; } = [];
+
+    private HashSet<string> ExpandedStepKeys { get; } = [];
+
+    private HashSet<string> LoadingStepLogKeys { get; } = [];
+
+    private Dictionary<string, IReadOnlyList<StepExecutionLog>> StepLogsByStepKey { get; } = new(StringComparer.Ordinal);
+
+    private Dictionary<string, string> StepLogErrorsByStepKey { get; } = new(StringComparer.Ordinal);
+
+    private IReadOnlyList<WorkflowInstanceSummary> InProgressRuns => WorkflowRuns
+        .Where(run => IsInProgressStatus(run.Status))
+        .OrderByDescending(run => run.CreatedAt)
+        .ToList();
+
+    private IReadOnlyList<WorkflowInstanceSummary> HistoryRuns => WorkflowRuns
+        .Where(run => !IsInProgressStatus(run.Status))
+        .OrderByDescending(run => run.CreatedAt)
+        .ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshRunsAsync();
+    }
+
+    private async Task RefreshRunsAsync()
+    {
+        IsLoadingRuns = true;
+        RunsErrorMessage = null;
+
+        using var cancellationSource = new CancellationTokenSource();
+        try
+        {
+            var runs = await BundleApiClient.GetWorkflowInstancesAsync(cancellationSource.Token);
+            WorkflowRuns = runs
+                .OrderByDescending(x => x.CreatedAt)
+                .ToList();
+            CleanupRunCaches();
+        }
+        catch (Exception ex)
+        {
+            RunsErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsLoadingRuns = false;
+        }
+    }
+
+    private async Task ToggleRunAsync(Guid instanceId)
+    {
+        if (ExpandedRunIds.Remove(instanceId))
+        {
+            return;
+        }
+
+        ExpandedRunIds.Add(instanceId);
+        await EnsureRunDetailsLoadedAsync(instanceId, forceReload: false);
+    }
+
+    private async Task RefreshRunAsync(Guid instanceId)
+    {
+        await EnsureRunDetailsLoadedAsync(instanceId, forceReload: true);
+        await RefreshRunsAsync();
+    }
+
+    private async Task CancelRunAsync(Guid instanceId)
+    {
+        if (CancelingRunInstanceIds.Contains(instanceId))
+        {
+            return;
+        }
+
+        CancelingRunInstanceIds.Add(instanceId);
+        RunDetailErrors.Remove(instanceId);
+
+        using var cancellationSource = new CancellationTokenSource();
+        try
+        {
+            await BundleApiClient.CancelWorkflowInstanceAsync(instanceId, cancellationSource.Token);
+            await EnsureRunDetailsLoadedAsync(instanceId, forceReload: true);
+            await RefreshRunsAsync();
+        }
+        catch (Exception ex)
+        {
+            RunDetailErrors[instanceId] = ex.Message;
+        }
+        finally
+        {
+            CancelingRunInstanceIds.Remove(instanceId);
+        }
+    }
+
+    private async Task EnsureRunDetailsLoadedAsync(Guid instanceId, bool forceReload)
+    {
+        if (!forceReload && (RunDetailsByInstanceId.ContainsKey(instanceId) || LoadingRunDetailInstanceIds.Contains(instanceId)))
+        {
+            return;
+        }
+
+        LoadingRunDetailInstanceIds.Add(instanceId);
+        RunDetailErrors.Remove(instanceId);
+
+        using var cancellationSource = new CancellationTokenSource();
+        try
+        {
+            RunDetailsByInstanceId[instanceId] = await BundleApiClient.GetWorkflowInstanceAsync(instanceId, cancellationSource.Token);
+        }
+        catch (Exception ex)
+        {
+            RunDetailErrors[instanceId] = ex.Message;
+        }
+        finally
+        {
+            LoadingRunDetailInstanceIds.Remove(instanceId);
+        }
+    }
+
+    private async Task ToggleStepAsync(Guid instanceId, string stepId)
+    {
+        var stepKey = BuildStepKey(instanceId, stepId);
+        if (ExpandedStepKeys.Remove(stepKey))
+        {
+            return;
+        }
+
+        ExpandedStepKeys.Add(stepKey);
+
+        if (StepLogsByStepKey.ContainsKey(stepKey) || LoadingStepLogKeys.Contains(stepKey))
+        {
+            return;
+        }
+
+        LoadingStepLogKeys.Add(stepKey);
+        StepLogErrorsByStepKey.Remove(stepKey);
+
+        using var cancellationSource = new CancellationTokenSource();
+        try
+        {
+            var logs = await BundleApiClient.GetStepExecutionLogsAsync(instanceId, stepId, cancellationSource.Token);
+            StepLogsByStepKey[stepKey] = logs
+                .OrderByDescending(x => x.Attempt)
+                .ThenByDescending(x => x.CreatedAt)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            StepLogErrorsByStepKey[stepKey] = ex.Message;
+        }
+        finally
+        {
+            LoadingStepLogKeys.Remove(stepKey);
+        }
+    }
+
+    private RenderFragment RunDetailsMarkup(WorkflowInstanceChecklist runDetail) => @<div class="run-detail">
+        <div class="instance-meta">
+            <div class="meta-line">Instance: <code>@runDetail.InstanceId</code></div>
+            <div class="meta-line">Workflow: <strong>@($"{runDetail.WorkflowName} v{runDetail.WorkflowVersion}")</strong></div>
+            <div class="meta-line">Status: <span class="status-pill @StatusClass(runDetail.Status)">@runDetail.Status</span></div>
+            <div class="meta-line">Updated: <strong>@runDetail.UpdatedAt.LocalDateTime</strong></div>
+        </div>
+
+        <div class="accordion-list">
+            @foreach (var step in runDetail.Steps)
+            {
+                var stepKey = BuildStepKey(runDetail.InstanceId, step.StepId);
+                var stepExpanded = ExpandedStepKeys.Contains(stepKey);
+                var stepLogs = StepLogsByStepKey.GetValueOrDefault(stepKey);
+                var stepLogError = StepLogErrorsByStepKey.GetValueOrDefault(stepKey);
+                var isLoadingStepLogs = LoadingStepLogKeys.Contains(stepKey);
+
+                <article class="accordion-item">
+                    <button
+                        class="accordion-header"
+                        @onclick="() => ToggleStepAsync(runDetail.InstanceId, step.StepId)"
+                        aria-expanded="@stepExpanded">
+                        <div class="header-main">
+                            <div class="step-name">@step.DisplayName</div>
+                            <code>@step.StepId</code>
+                        </div>
+                        <div class="header-stats">
+                            <span><strong>Status:</strong> <span class="status-pill @StatusClass(step.Status)">@step.Status</span></span>
+                            <span><strong>Attempt:</strong> @step.Attempt</span>
+                            <span><strong>Started:</strong> @(step.StartedAt?.LocalDateTime.ToString() ?? "-")</span>
+                            <span><strong>Finished:</strong> @(step.FinishedAt?.LocalDateTime.ToString() ?? "-")</span>
+                            <span><strong>Blocked By:</strong> @(step.BlockedBy.Count == 0 ? "-" : string.Join(", ", step.BlockedBy))</span>
+                            <span><strong>Error:</strong> @(string.IsNullOrWhiteSpace(step.LastError) ? "-" : step.LastError)</span>
+                        </div>
+                    </button>
+
+                    @if (stepExpanded)
+                    {
+                        <div class="accordion-body">
+                            @if (isLoadingStepLogs)
+                            {
+                                <p>Loading logs...</p>
+                            }
+                            else if (!string.IsNullOrWhiteSpace(stepLogError))
+                            {
+                                <div class="alert error">@stepLogError</div>
+                            }
+                            else if (stepLogs is null || stepLogs.Count == 0)
+                            {
+                                <p>No logs found for this step in the last 30 days.</p>
+                            }
+                            else
+                            {
+                                @foreach (var log in stepLogs)
+                                {
+                                    <div class="log-entry">
+                                        <div class="meta-line">
+                                            Attempt <strong>@log.Attempt</strong> |
+                                            Status <span class="status-pill @(log.IsSuccess ? "succeeded" : "failed")">@(log.IsSuccess ? "Succeeded" : "Failed")</span> |
+                                            Recorded <strong>@log.CreatedAt.LocalDateTime</strong>
+                                        </div>
+                                        <pre>@log.ConsoleOutput</pre>
+                                    </div>
+                                }
+                            }
+                        </div>
+                    }
+                </article>
+            }
+        </div>
+    </div>;
+
+    private void CleanupRunCaches()
+    {
+        var validInstanceIds = WorkflowRuns
+            .Select(x => x.InstanceId)
+            .ToHashSet();
+
+        ExpandedRunIds.RemoveWhere(instanceId => !validInstanceIds.Contains(instanceId));
+        LoadingRunDetailInstanceIds.RemoveWhere(instanceId => !validInstanceIds.Contains(instanceId));
+        CancelingRunInstanceIds.RemoveWhere(instanceId => !validInstanceIds.Contains(instanceId));
+
+        RemoveMissingKeys(RunDetailsByInstanceId, validInstanceIds);
+        RemoveMissingKeys(RunDetailErrors, validInstanceIds);
+
+        var invalidStepKeys = ExpandedStepKeys
+            .Where(stepKey => !ContainsValidInstanceKeyPrefix(stepKey, validInstanceIds))
+            .ToList();
+
+        foreach (var stepKey in invalidStepKeys)
+        {
+            ExpandedStepKeys.Remove(stepKey);
+            LoadingStepLogKeys.Remove(stepKey);
+            StepLogsByStepKey.Remove(stepKey);
+            StepLogErrorsByStepKey.Remove(stepKey);
+        }
+    }
+
+    private static bool ContainsValidInstanceKeyPrefix(string stepKey, HashSet<Guid> validInstanceIds)
+    {
+        var delimiterIndex = stepKey.IndexOf("::", StringComparison.Ordinal);
+        if (delimiterIndex <= 0)
+        {
+            return false;
+        }
+
+        var instanceSegment = stepKey[..delimiterIndex];
+        return Guid.TryParse(instanceSegment, out var instanceId) && validInstanceIds.Contains(instanceId);
+    }
+
+    private static void RemoveMissingKeys<TValue>(Dictionary<Guid, TValue> source, HashSet<Guid> validKeys)
+    {
+        var keysToRemove = source.Keys
+            .Where(key => !validKeys.Contains(key))
+            .ToList();
+
+        foreach (var key in keysToRemove)
+        {
+            source.Remove(key);
+        }
+    }
+
+    private static bool IsInProgressStatus(string status)
+    {
+        return status.ToLowerInvariant() switch
+        {
+            "succeeded" => false,
+            "failed" => false,
+            "canceled" => false,
+            "aborted" => false,
+            _ => true
+        };
+    }
+
+    private static string BuildStepKey(Guid instanceId, string stepId)
+    {
+        return $"{instanceId:D}::{stepId}";
+    }
+
+    private static string StatusClass(string status)
+    {
+        return status.ToLowerInvariant() switch
+        {
+            "running" => "running",
+            "runnable" => "runnable",
+            "waiting" => "waiting",
+            "succeeded" => "succeeded",
+            "failed" => "failed",
+            "canceled" => "canceled",
+            "aborted" => "aborted",
+            _ => "pending"
+        };
+    }
+}

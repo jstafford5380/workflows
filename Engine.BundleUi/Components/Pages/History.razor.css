@@ -1,0 +1,272 @@
+.history-shell {
+    display: grid;
+    gap: 1.2rem;
+}
+
+.hero h1 {
+    margin: 0;
+    font-size: clamp(1.8rem, 3vw, 2.6rem);
+    letter-spacing: 0.02em;
+}
+
+.hero p {
+    margin: 0.4rem 0 0;
+    color: var(--muted);
+}
+
+.panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 1rem;
+    box-shadow: 0 14px 35px rgba(7, 16, 38, 0.12);
+}
+
+.panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.8rem;
+    margin-bottom: 0.75rem;
+}
+
+.panel-header h2 {
+    margin: 0;
+}
+
+.table-wrap {
+    overflow-x: auto;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.92rem;
+}
+
+th,
+td {
+    text-align: left;
+    border-bottom: 1px solid #d6deec;
+    padding: 0.72rem 0.62rem;
+    vertical-align: top;
+}
+
+tbody .run-row:hover {
+    background: #f6f9ff;
+}
+
+th {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+}
+
+button {
+    border: 0;
+    border-radius: 999px;
+    padding: 0.5rem 0.82rem;
+    cursor: pointer;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.36rem;
+    line-height: 1;
+}
+
+.btn-icon {
+    font-size: 0.9rem;
+    opacity: 0.9;
+}
+
+.btn-secondary {
+    background: #eef2fb;
+    border: 1px solid #c6d4ef;
+    color: #1f3e72;
+}
+
+.btn-secondary:hover:not(:disabled) {
+    background: #e4ebfa;
+}
+
+.btn-danger {
+    background: #b43333;
+    color: #fff;
+    border: 1px solid #962727;
+}
+
+.btn-danger:hover:not(:disabled) {
+    background: #a72f2f;
+}
+
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.action-buttons {
+    display: flex;
+    gap: 0.42rem;
+    flex-wrap: wrap;
+}
+
+.expanded-row td {
+    background: #f8fbff;
+    border-top: 0;
+    border-bottom: 1px solid #cfd9ea;
+    padding: 0.9rem;
+}
+
+.run-detail {
+    padding: 0.1rem 0;
+}
+
+.instance-meta {
+    margin-top: 0.2rem;
+    margin-bottom: 0.9rem;
+}
+
+.meta-line {
+    margin-top: 0.3rem;
+}
+
+.accordion-list {
+    display: grid;
+    gap: 0.8rem;
+}
+
+.accordion-item {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    background: #fff;
+}
+
+.accordion-header {
+    width: 100%;
+    border: 0;
+    border-radius: 0;
+    background: #f8fafd;
+    color: inherit;
+    text-align: left;
+    padding: 0.8rem;
+    display: block;
+}
+
+.header-main {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: baseline;
+}
+
+.step-name {
+    font-weight: 700;
+}
+
+.header-stats {
+    margin-top: 0.6rem;
+    display: grid;
+    gap: 0.4rem;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    font-size: 0.87rem;
+}
+
+.accordion-body {
+    padding: 0.8rem;
+    border-top: 1px solid var(--border);
+}
+
+.log-entry {
+    border: 1px solid #d8e1f1;
+    border-radius: 10px;
+    padding: 0.6rem;
+    background: #fff;
+    margin-top: 0.6rem;
+}
+
+.log-entry pre {
+    margin: 0.5rem 0 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 0.8rem;
+    background: #f7f9fc;
+    border: 1px solid #dde5f2;
+    border-radius: 8px;
+    padding: 0.6rem;
+}
+
+.alert {
+    margin-top: 0.8rem;
+    border-radius: 12px;
+    padding: 0.7rem 0.8rem;
+}
+
+.alert.error {
+    border: 1px solid #de6a6a;
+    background: #ffe8e8;
+    color: #7b1313;
+}
+
+.status-pill {
+    display: inline-block;
+    border-radius: 999px;
+    padding: 0.15rem 0.55rem;
+    font-size: 0.78rem;
+    border: 1px solid transparent;
+    font-weight: 600;
+}
+
+.status-pill.pending {
+    background: #f2f4f8;
+    border-color: #d1d7e3;
+    color: #31435f;
+}
+
+.status-pill.runnable {
+    background: #e8f4ff;
+    border-color: #a9cfee;
+    color: #14518e;
+}
+
+.status-pill.running {
+    background: #fff4de;
+    border-color: #f0cd82;
+    color: #7a5316;
+}
+
+.status-pill.waiting {
+    background: #efe7ff;
+    border-color: #c9b2f8;
+    color: #4d2c96;
+}
+
+.status-pill.succeeded {
+    background: #e8fff2;
+    border-color: #9fd4ba;
+    color: #196046;
+}
+
+.status-pill.failed {
+    background: #ffe8e8;
+    border-color: #de6a6a;
+    color: #7b1313;
+}
+
+.status-pill.canceled {
+    background: #f1f1f1;
+    border-color: #cdcdcd;
+    color: #505050;
+}
+
+.status-pill.aborted {
+    background: #f4f0f0;
+    border-color: #b7a2a2;
+    color: #5f4d4d;
+}
+
+code {
+    font-size: 0.8rem;
+}

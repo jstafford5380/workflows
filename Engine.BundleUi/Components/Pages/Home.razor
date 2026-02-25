@@ -131,7 +131,6 @@
                         <th>Finished</th>
                         <th>Blocked By</th>
                         <th>Error</th>
-                        <th>History</th>
                     </tr>
                     </thead>
                     <tbody>
@@ -148,102 +147,12 @@
                             <td>@(step.FinishedAt?.LocalDateTime.ToString() ?? "-")</td>
                             <td>@(step.BlockedBy.Count == 0 ? "-" : string.Join(", ", step.BlockedBy))</td>
                             <td>@(string.IsNullOrWhiteSpace(step.LastError) ? "-" : step.LastError)</td>
-                            <td>
-                                <button class="btn-secondary" @onclick="() => LoadStepLogsAsync(step.StepId)" disabled="@IsBusy">
-                                    View Logs
-                                </button>
-                            </td>
                         </tr>
                     }
                     </tbody>
                 </table>
             </div>
 
-            @if (!string.IsNullOrWhiteSpace(LogsErrorMessage))
-            {
-                <div class="alert error">@LogsErrorMessage</div>
-            }
-
-            @if (SelectedStepLogsStepId is not null)
-            {
-                <section class="step-logs">
-                    <div class="panel-header">
-                        <h3>Step Logs: @SelectedStepLogsStepId</h3>
-                        <button class="btn-secondary" @onclick="ClearStepLogs" disabled="@IsBusy">Close</button>
-                    </div>
-
-                    @if (IsLoadingStepLogs)
-                    {
-                        <p>Loading logs...</p>
-                    }
-                    else if (SelectedStepLogs.Count == 0)
-                    {
-                        <p>No logs found for this step in the last 30 days.</p>
-                    }
-                    else
-                    {
-                        @foreach (var log in SelectedStepLogs)
-                        {
-                            <div class="log-entry">
-                                <div class="meta-line">
-                                    Attempt <strong>@log.Attempt</strong> |
-                                    Status <span class="status-pill @(log.IsSuccess ? "succeeded" : "failed")">@(log.IsSuccess ? "Succeeded" : "Failed")</span> |
-                                    Recorded <strong>@log.CreatedAt.LocalDateTime</strong>
-                                </div>
-                                <pre>@log.ConsoleOutput</pre>
-                            </div>
-                        }
-                    }
-                </section>
-            }
-        }
-    </section>
-
-    <section class="panel">
-        <div class="panel-header">
-            <h2>Workflow Runs</h2>
-            <button class="btn-secondary" @onclick="RefreshRunsAsync" disabled="@IsLoadingRuns">Refresh</button>
-        </div>
-
-        @if (!string.IsNullOrWhiteSpace(RunsErrorMessage))
-        {
-            <div class="alert error">@RunsErrorMessage</div>
-        }
-        else if (WorkflowRuns.Count == 0)
-        {
-            <p>No runs found.</p>
-        }
-        else
-        {
-            <div class="table-wrap">
-                <table>
-                    <thead>
-                    <tr>
-                        <th>Instance</th>
-                        <th>Workflow</th>
-                        <th>Status</th>
-                        <th>Created</th>
-                        <th>Updated</th>
-                        <th>Action</th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    @foreach (var run in WorkflowRuns)
-                    {
-                        <tr>
-                            <td><code>@run.InstanceId</code></td>
-                            <td><strong>@($"{run.WorkflowName} v{run.WorkflowVersion}")</strong></td>
-                            <td><span class="status-pill @StatusClass(run.Status)">@run.Status</span></td>
-                            <td>@run.CreatedAt.LocalDateTime</td>
-                            <td>@run.UpdatedAt.LocalDateTime</td>
-                            <td>
-                                <button class="btn-secondary" @onclick="() => OpenRunAsync(run.InstanceId)" disabled="@IsBusy">Open</button>
-                            </td>
-                        </tr>
-                    }
-                    </tbody>
-                </table>
-            </div>
         }
     </section>
 
@@ -413,15 +322,11 @@
 
     private bool IsLoadingWorkflows { get; set; }
 
-    private bool IsLoadingRuns { get; set; }
-
     private bool IsWatchingInstance { get; set; }
 
     private string? ErrorMessage { get; set; }
 
     private string? WorkflowsErrorMessage { get; set; }
-
-    private string? RunsErrorMessage { get; set; }
 
     private string? ExecutionErrorMessage { get; set; }
 
@@ -429,22 +334,11 @@
 
     private string? SuccessMessage { get; set; }
 
-    private bool IsLoadingStepLogs { get; set; }
-
-    private string? LogsErrorMessage { get; set; }
-
-    private string? SelectedStepLogsStepId { get; set; }
-
-    private IReadOnlyList<StepExecutionLog> SelectedStepLogs { get; set; } = [];
-
-    private IReadOnlyList<WorkflowInstanceSummary> WorkflowRuns { get; set; } = [];
-
     private CancellationTokenSource? _watchCancellationSource;
 
     protected override async Task OnInitializedAsync()
     {
         await RefreshWorkflowsAsync();
-        await RefreshRunsAsync();
     }
 
     public void Dispose()
@@ -539,8 +433,6 @@
                 selected.Version,
                 cancellationToken);
 
-            await RefreshRunsAsync();
-            ClearStepLogs();
             ExecutionErrorMessage = null;
             ExecutionSuccessMessage = $"Started workflow instance {CurrentInstance.InstanceId}.";
             StartWatching(CurrentInstance.InstanceId);
@@ -572,49 +464,9 @@
         {
             await BundleApiClient.CancelWorkflowInstanceAsync(CurrentInstance.InstanceId, cancellationToken);
             CurrentInstance = await BundleApiClient.GetWorkflowInstanceAsync(CurrentInstance.InstanceId, cancellationToken);
-            await RefreshRunsAsync();
             ExecutionErrorMessage = null;
             ExecutionSuccessMessage = $"Workflow instance {CurrentInstance.InstanceId} has been canceled.";
         });
-    }
-
-    private async Task LoadStepLogsAsync(string stepId)
-    {
-        if (CurrentInstance is null || string.IsNullOrWhiteSpace(stepId))
-        {
-            return;
-        }
-
-        IsLoadingStepLogs = true;
-        LogsErrorMessage = null;
-        SelectedStepLogsStepId = stepId;
-        SelectedStepLogs = [];
-
-        using var cancellationSource = new CancellationTokenSource();
-        try
-        {
-            var logs = await BundleApiClient.GetStepExecutionLogsAsync(CurrentInstance.InstanceId, stepId, cancellationSource.Token);
-            SelectedStepLogs = logs
-                .OrderByDescending(x => x.Attempt)
-                .ThenByDescending(x => x.CreatedAt)
-                .ToList();
-        }
-        catch (Exception ex)
-        {
-            LogsErrorMessage = ex.Message;
-        }
-        finally
-        {
-            IsLoadingStepLogs = false;
-        }
-    }
-
-    private void ClearStepLogs()
-    {
-        SelectedStepLogsStepId = null;
-        SelectedStepLogs = [];
-        LogsErrorMessage = null;
-        IsLoadingStepLogs = false;
     }
 
     private async Task RefreshWorkflowsAsync()
@@ -650,49 +502,6 @@
         }
     }
 
-    private async Task RefreshRunsAsync()
-    {
-        IsLoadingRuns = true;
-        RunsErrorMessage = null;
-
-        using var cancellationSource = new CancellationTokenSource();
-        try
-        {
-            var runs = await BundleApiClient.GetWorkflowInstancesAsync(cancellationSource.Token);
-            WorkflowRuns = runs
-                .OrderByDescending(x => x.CreatedAt)
-                .ToList();
-        }
-        catch (Exception ex)
-        {
-            RunsErrorMessage = ex.Message;
-        }
-        finally
-        {
-            IsLoadingRuns = false;
-        }
-    }
-
-    private async Task OpenRunAsync(Guid instanceId)
-    {
-        await RunBusyAsync(async cancellationToken =>
-        {
-            var instance = await BundleApiClient.GetWorkflowInstanceAsync(instanceId, cancellationToken);
-            CurrentInstance = instance;
-            ClearStepLogs();
-            ExecutionErrorMessage = null;
-            ExecutionSuccessMessage = $"Opened workflow instance {instance.InstanceId}.";
-
-            if (IsTerminalStatus(instance.Status))
-            {
-                StopWatching();
-            }
-            else
-            {
-                StartWatching(instance.InstanceId);
-            }
-        });
-    }
 
     private WorkflowDefinitionMetadata? GetSelectedWorkflow()
     {
