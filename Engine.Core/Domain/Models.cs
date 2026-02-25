@@ -1,0 +1,108 @@
+using System.Text.Json.Nodes;
+using Engine.Core.Definitions;
+
+namespace Engine.Core.Domain;
+
+public sealed record WorkflowDefinitionMetadata(string Name, int Version, DateTimeOffset RegisteredAt);
+
+public sealed record WorkflowInstanceRecord(
+    Guid InstanceId,
+    string WorkflowName,
+    int WorkflowVersion,
+    WorkflowInstanceStatus Status,
+    JsonObject Inputs,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
+public sealed record StepRunRecord(
+    Guid InstanceId,
+    string StepId,
+    string DisplayName,
+    string ActivityRef,
+    StepRunStatus Status,
+    int Attempt,
+    int StepOrder,
+    string IdempotencyKey,
+    DateTimeOffset? StartedAt,
+    DateTimeOffset? FinishedAt,
+    DateTimeOffset? NextAttemptAt,
+    DateTimeOffset? LeaseExpiresAt,
+    string? LeaseOwner,
+    string? LastError,
+    JsonObject Outputs,
+    WorkflowStepDefinition StepDefinition);
+
+public sealed record StepDependencyRecord(Guid InstanceId, string StepId, string DependsOnStepId);
+
+public sealed record EventSubscriptionRecord(
+    Guid SubscriptionId,
+    Guid InstanceId,
+    string StepId,
+    string EventType,
+    string CorrelationKey,
+    EventSubscriptionStatus Status,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? FulfilledAt,
+    JsonObject? Payload);
+
+public sealed record OutboxMessageRecord(
+    Guid OutboxId,
+    OutboxMessageType Type,
+    JsonObject Payload,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? ProcessedAt);
+
+public sealed record WorkQueueItemRecord(
+    Guid WorkItemId,
+    WorkItemKind Kind,
+    JsonObject Payload,
+    DateTimeOffset AvailableAt,
+    DateTimeOffset? DequeuedAt,
+    DateTimeOffset? LeaseExpiresAt,
+    string? LeaseOwner,
+    int DequeueCount,
+    DateTimeOffset? CompletedAt);
+
+public sealed record ActivityExecutionRequest(
+    Guid InstanceId,
+    string StepId,
+    string ActivityRef,
+    JsonObject Inputs,
+    string IdempotencyKey);
+
+public sealed record ActivityExecutionResult(
+    bool IsSuccess,
+    JsonObject Outputs,
+    string? ErrorMessage,
+    bool IsRetryable = true);
+
+public sealed record ExternalEventEnvelope(
+    string EventId,
+    string EventType,
+    string CorrelationKey,
+    JsonObject Payload,
+    string? PayloadHash = null);
+
+public sealed record EventIngestResult(bool IsDuplicate, int FulfilledSubscriptions);
+
+public sealed record ChecklistStepView(
+    string StepId,
+    string DisplayName,
+    StepRunStatus Status,
+    int Attempt,
+    DateTimeOffset? StartedAt,
+    DateTimeOffset? FinishedAt,
+    IReadOnlyList<string> BlockedBy,
+    string? LastError,
+    IReadOnlyList<string> OutputKeys,
+    IReadOnlyDictionary<string, bool> SafetyMetadata);
+
+public sealed record WorkflowInstanceChecklistView(
+    Guid InstanceId,
+    string WorkflowName,
+    int WorkflowVersion,
+    WorkflowInstanceStatus Status,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt,
+    JsonObject Inputs,
+    IReadOnlyList<ChecklistStepView> Steps);

@@ -1,0 +1,251 @@
+@page "/"
+@using Engine.BundleUi.Models
+@using Engine.BundleUi.Services
+@inject BundleApiClient BundleApiClient
+
+<PageTitle>Bundle Studio</PageTitle>
+
+<div class="studio-shell">
+    <section class="hero">
+        <h1>Workflow Bundle Studio</h1>
+        <p>Upload a workflow bundle ZIP, preview the workflow + scripts + execution plan, then register it.</p>
+    </section>
+
+    <section class="panel upload-panel">
+        <div class="field-row">
+            <label for="bundleInput">Bundle ZIP</label>
+            <InputFile id="bundleInput" OnChange="OnFileSelected" accept=".zip" />
+        </div>
+
+        @if (SelectedFile is not null)
+        {
+            <div class="selected-file">Selected: <strong>@SelectedFile.Name</strong> (@FormatBytes(SelectedFile.Size))</div>
+        }
+
+        <div class="actions">
+            <button class="btn-primary" @onclick="PreviewAsync" disabled="@(IsBusy || SelectedFile is null)">Preview Bundle</button>
+            @if (Preview is not null && Preview.CanRegister && Registration is null)
+            {
+                <button class="btn-accent" @onclick="RegisterAsync" disabled="@IsBusy">Register Bundle</button>
+            }
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+        {
+            <div class="alert error">@ErrorMessage</div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(SuccessMessage))
+        {
+            <div class="alert success">@SuccessMessage</div>
+        }
+    </section>
+
+    @if (Preview is not null)
+    {
+        <section class="panel metadata-grid">
+            <div>
+                <h2>@Preview.WorkflowName</h2>
+                <div class="meta-line">Version: <strong>@Preview.WorkflowVersion</strong></div>
+                <div class="meta-line">Bundle file: <strong>@Preview.BundleFileName</strong></div>
+                <div class="meta-line">Preview ID: <code>@Preview.PreviewId</code></div>
+                <div class="meta-line">Expires: <strong>@Preview.ExpiresAt.LocalDateTime</strong></div>
+            </div>
+            <div>
+                <h3>Description</h3>
+                <p>@(string.IsNullOrWhiteSpace(Preview.WorkflowDescription) ? "(none)" : Preview.WorkflowDescription)</p>
+                <h3>Details</h3>
+                <p>@(string.IsNullOrWhiteSpace(Preview.WorkflowDetails) ? "(none)" : Preview.WorkflowDetails)</p>
+            </div>
+        </section>
+
+        @if (Preview.ValidationErrors.Count > 0)
+        {
+            <section class="panel">
+                <h2>Validation Errors</h2>
+                <ul class="error-list">
+                    @foreach (var error in Preview.ValidationErrors)
+                    {
+                        <li>@error</li>
+                    }
+                </ul>
+            </section>
+        }
+
+        <section class="panel">
+            <h2>Steps</h2>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>Step</th>
+                        <th>Type</th>
+                        <th>Activity Ref</th>
+                        <th>Resolved Script</th>
+                        <th>Depends On</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var step in Preview.Steps)
+                    {
+                        <tr>
+                            <td>
+                                <div class="step-name">@step.DisplayName</div>
+                                <code>@step.StepId</code>
+                            </td>
+                            <td>@(step.IsWaitStep ? $"Wait ({step.EventType})" : "Activity")</td>
+                            <td><code>@step.ActivityRef</code></td>
+                            <td>
+                                @if (step.ResolvedScriptPath is null)
+                                {
+                                    <span>-</span>
+                                }
+                                else
+                                {
+                                    <span class="@(step.ScriptExists ? "ok" : "missing")">@step.ResolvedScriptPath</span>
+                                }
+                            </td>
+                            <td>
+                                @if (step.DependsOn.Count == 0)
+                                {
+                                    <span>-</span>
+                                }
+                                else
+                                {
+                                    <span>@string.Join(", ", step.DependsOn)</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="panel split-panel">
+            <div>
+                <h2>Files</h2>
+                <div class="file-list">
+                    @foreach (var file in Preview.Files)
+                    {
+                        <div><code>@file</code></div>
+                    }
+                </div>
+            </div>
+            <div>
+                <h2>Execution Plan</h2>
+                @if (Preview.ExecutionPlan.Count == 0)
+                {
+                    <p>No plan available (workflow validation failed).</p>
+                }
+                else
+                {
+                    @foreach (var stage in Preview.ExecutionPlan)
+                    {
+                        <div class="stage">
+                            <div class="stage-label">Stage @stage.StageNumber</div>
+                            <div class="chips">
+                                @foreach (var stepId in stage.StepIds)
+                                {
+                                    <span class="chip">@stepId</span>
+                                }
+                            </div>
+                        </div>
+                    }
+                }
+            </div>
+        </section>
+    }
+</div>
+
+@code {
+    private IBrowserFile? SelectedFile { get; set; }
+
+    private BundlePreviewResponse? Preview { get; set; }
+
+    private BundleRegisterResponse? Registration { get; set; }
+
+    private bool IsBusy { get; set; }
+
+    private string? ErrorMessage { get; set; }
+
+    private string? SuccessMessage { get; set; }
+
+    private void OnFileSelected(InputFileChangeEventArgs eventArgs)
+    {
+        SelectedFile = eventArgs.FileCount > 0 ? eventArgs.File : null;
+        Preview = null;
+        Registration = null;
+        ErrorMessage = null;
+        SuccessMessage = null;
+    }
+
+    private async Task PreviewAsync()
+    {
+        if (SelectedFile is null)
+        {
+            return;
+        }
+
+        await RunBusyAsync(async cancellationToken =>
+        {
+            Preview = await BundleApiClient.PreviewBundleAsync(SelectedFile, cancellationToken);
+            Registration = null;
+            SuccessMessage = Preview.CanRegister
+                ? "Preview generated. Bundle is valid and ready to register."
+                : "Preview generated with validation errors. Resolve issues before registration.";
+        });
+    }
+
+    private async Task RegisterAsync()
+    {
+        if (Preview is null)
+        {
+            return;
+        }
+
+        await RunBusyAsync(async cancellationToken =>
+        {
+            Registration = await BundleApiClient.RegisterPreviewAsync(Preview.PreviewId, cancellationToken);
+            SuccessMessage =
+                $"Registered bundle {Registration.BundleId} as workflow {Registration.WorkflowName} v{Registration.WorkflowVersion}.";
+            ErrorMessage = null;
+        });
+    }
+
+    private async Task RunBusyAsync(Func<CancellationToken, Task> action)
+    {
+        ErrorMessage = null;
+        IsBusy = true;
+
+        using var cancellationSource = new CancellationTokenSource();
+        try
+        {
+            await action(cancellationSource.Token);
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+            SuccessMessage = null;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private static string FormatBytes(long size)
+    {
+        var units = new[] { "B", "KB", "MB", "GB" };
+        var value = (double)size;
+        var index = 0;
+
+        while (value >= 1024 && index < units.Length - 1)
+        {
+            value /= 1024;
+            index++;
+        }
+
+        return $"{value:0.##} {units[index]}";
+    }
+}

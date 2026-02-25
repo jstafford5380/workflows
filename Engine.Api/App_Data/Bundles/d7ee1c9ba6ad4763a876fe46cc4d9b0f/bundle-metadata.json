@@ -1,0 +1,1 @@
+{"bundleId":"d7ee1c9ba6ad4763a876fe46cc4d9b0f","bundleFileName":"provision-bundle.zip","name":"provision-skeleton-bundle","version":1,"registeredAt":"2026-02-24T21:34:31.814592+00:00","files":["scripts/create-project.sh","scripts/create-service-accounts.sh","scripts/finalize.sh","workflow.json"]}

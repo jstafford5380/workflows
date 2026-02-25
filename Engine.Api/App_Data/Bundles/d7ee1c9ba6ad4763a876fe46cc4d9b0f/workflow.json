@@ -1,0 +1,91 @@
+{
+  "name": "provision-skeleton-bundle",
+  "version": 1,
+  "description": "Bundle-based provisioning skeleton workflow",
+  "details": "Demonstrates script activities packaged inside a zip bundle with an approval wait state.",
+  "steps": [
+    {
+      "stepId": "CreateProject",
+      "displayName": "Create Project",
+      "activityRef": "create-project.sh",
+      "inputs": {
+        "projectId": { "binding": "$.inputs.projectId" }
+      },
+      "outputsSchema": ["projectNumber"],
+      "retryPolicy": {
+        "maxAttempts": 3,
+        "initialDelaySeconds": 2,
+        "maxDelaySeconds": 30,
+        "backoffFactor": 2.0
+      },
+      "timeoutSeconds": 60,
+      "safetyMetadata": {
+        "createsResources": true,
+        "changesIam": false
+      }
+    },
+    {
+      "stepId": "RequestApproval",
+      "displayName": "Request Approval",
+      "activityRef": "",
+      "inputs": {},
+      "outputsSchema": ["approved"],
+      "retryPolicy": {
+        "maxAttempts": 3,
+        "initialDelaySeconds": 2,
+        "maxDelaySeconds": 30,
+        "backoffFactor": 2.0
+      },
+      "waitForEvent": {
+        "eventType": "approval",
+        "correlationKeyExpression": "$.instanceId"
+      },
+      "safetyMetadata": {
+        "createsResources": false,
+        "changesIam": false
+      }
+    },
+    {
+      "stepId": "CreateServiceAccounts",
+      "displayName": "Create Service Accounts",
+      "activityRef": "create-service-accounts.sh",
+      "inputs": {
+        "projectNumber": { "binding": "$.steps.CreateProject.outputs.projectNumber" }
+      },
+      "outputsSchema": ["serviceAccountCount"],
+      "retryPolicy": {
+        "maxAttempts": 3,
+        "initialDelaySeconds": 2,
+        "maxDelaySeconds": 30,
+        "backoffFactor": 2.0
+      },
+      "timeoutSeconds": 60,
+      "safetyMetadata": {
+        "createsResources": true,
+        "changesIam": true
+      }
+    },
+    {
+      "stepId": "Finalize",
+      "displayName": "Finalize Provisioning",
+      "activityRef": "finalize.sh",
+      "inputs": {
+        "projectNumber": { "binding": "$.steps.CreateProject.outputs.projectNumber" },
+        "approved": { "binding": "$.steps.RequestApproval.outputs.approved" },
+        "serviceAccounts": { "binding": "$.steps.CreateServiceAccounts.outputs.serviceAccountCount" }
+      },
+      "outputsSchema": ["result"],
+      "retryPolicy": {
+        "maxAttempts": 3,
+        "initialDelaySeconds": 2,
+        "maxDelaySeconds": 30,
+        "backoffFactor": 2.0
+      },
+      "timeoutSeconds": 60,
+      "safetyMetadata": {
+        "createsResources": false,
+        "changesIam": false
+      }
+    }
+  ]
+}

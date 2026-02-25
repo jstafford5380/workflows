@@ -1,0 +1,72 @@
+.page {
+    min-height: 100vh;
+    display: flex;
+    background:
+        radial-gradient(circle at 15% 20%, rgba(255, 216, 132, 0.35), transparent 32%),
+        radial-gradient(circle at 88% 10%, rgba(116, 194, 255, 0.28), transparent 30%),
+        linear-gradient(180deg, #f6f8fb, #eef3f8);
+}
+
+.sidebar {
+    width: 280px;
+    background: linear-gradient(180deg, #0f2d51 0%, #1a4d3e 100%);
+    color: #f3f8ff;
+}
+
+main {
+    flex: 1;
+    min-width: 0;
+}
+
+.top-row {
+    height: 3.4rem;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 0 1.4rem;
+    border-bottom: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.72);
+    backdrop-filter: blur(4px);
+}
+
+.top-row a {
+    color: #244f7f;
+    text-decoration: none;
+    font-size: 0.9rem;
+}
+
+.content {
+    padding: 1.4rem;
+}
+
+@media (max-width: 900px) {
+    .page {
+        flex-direction: column;
+    }
+
+    .sidebar {
+        width: 100%;
+    }
+
+    .content {
+        padding: 1rem;
+    }
+}
+
+#blazor-error-ui {
+    background: #fff2cc;
+    border-top: 1px solid #d2a83f;
+    bottom: 0;
+    box-sizing: border-box;
+    display: none;
+    left: 0;
+    padding: 0.6rem 1rem;
+    position: fixed;
+    width: 100%;
+    z-index: 1000;
+}
+
+#blazor-error-ui .dismiss {
+    cursor: pointer;
+    float: right;
+}

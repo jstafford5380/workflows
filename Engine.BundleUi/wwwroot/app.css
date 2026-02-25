@@ -1,0 +1,27 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+:root {
+    --panel: rgba(255, 255, 255, 0.92);
+    --border: #d5deeb;
+    --muted: #4f637a;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+    color: #11253f;
+}
+
+code,
+pre {
+    font-family: "IBM Plex Mono", monospace;
+}
+
+a {
+    color: inherit;
+}

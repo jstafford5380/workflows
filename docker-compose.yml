@@ -1,0 +1,63 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: workflow-postgres
+    environment:
+      POSTGRES_DB: workflow_engine
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d workflow_engine"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    image: mcr.microsoft.com/dotnet/sdk:10.0
+    container_name: workflow-api
+    working_dir: /workspace
+    command: >
+      dotnet run --project Engine.Api --no-launch-profile --urls http://0.0.0.0:8080
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      Persistence__Provider: Postgres
+      ConnectionStrings__WorkflowDb: Host=postgres;Port=5432;Database=workflow_engine;Username=postgres;Password=postgres
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./:/workspace
+      - nuget-cache:/root/.nuget/packages
+      - bundles:/workspace/Engine.Api/App_Data/Bundles
+      - previews:/workspace/Engine.Api/App_Data/BundlePreviews
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  ui:
+    image: mcr.microsoft.com/dotnet/sdk:10.0
+    container_name: workflow-ui
+    working_dir: /workspace
+    command: >
+      dotnet run --project Engine.BundleUi --no-launch-profile --urls http://0.0.0.0:8081
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8081
+      Api__BaseUrl: http://api:8080
+    ports:
+      - "5100:8081"
+    volumes:
+      - ./:/workspace
+      - nuget-cache:/root/.nuget/packages
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  nuget-cache:
+  bundles:
+  previews:
