@@ -15,7 +15,15 @@ public interface IInstanceRepository
 
     Task<WorkflowInstanceRecord?> GetInstanceAsync(Guid instanceId, CancellationToken cancellationToken);
 
+    Task<IReadOnlyList<WorkflowInstanceRecord>> ListInstancesAsync(int take, CancellationToken cancellationToken);
+
     Task<IReadOnlyList<StepRunRecord>> GetStepRunsAsync(Guid instanceId, CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<StepExecutionLogRecord>> GetStepExecutionLogsAsync(
+        Guid instanceId,
+        string stepId,
+        DateTimeOffset now,
+        CancellationToken cancellationToken);
 
     Task<IReadOnlyList<StepDependencyRecord>> GetDependenciesAsync(Guid instanceId, CancellationToken cancellationToken);
 
@@ -59,9 +67,19 @@ public interface IInstanceRepository
         string leaseOwner,
         string error,
         bool shouldRetry,
+        bool abortWorkflow,
         DateTimeOffset? nextAttemptAt,
         DateTimeOffset now,
         IReadOnlyList<OutboxMessageRecord> newOutboxMessages,
+        CancellationToken cancellationToken);
+
+    Task SaveStepExecutionLogAsync(
+        Guid instanceId,
+        string stepId,
+        int attempt,
+        bool isSuccess,
+        string consoleOutput,
+        DateTimeOffset now,
         CancellationToken cancellationToken);
 
     Task<bool> TryCancelInstanceAsync(Guid instanceId, DateTimeOffset now, CancellationToken cancellationToken);

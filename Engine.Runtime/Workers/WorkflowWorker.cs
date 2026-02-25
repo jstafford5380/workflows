@@ -153,9 +153,28 @@ public sealed class WorkflowWorker : BackgroundService
                 claimedStep.StepId,
                 claimedStep.ActivityRef,
                 resolvedInputs,
-                claimedStep.IdempotencyKey);
+                claimedStep.IdempotencyKey,
+                claimedStep.StepDefinition.ScriptParameters);
 
             var activityResult = await activityRunner.RunAsync(executionRequest, executionCts.Token);
+            var capturedConsoleOutput = activityResult.ConsoleOutput;
+            if (string.IsNullOrWhiteSpace(capturedConsoleOutput) && !activityResult.IsSuccess)
+            {
+                capturedConsoleOutput = $"No script console output captured.{Environment.NewLine}Error: {activityResult.ErrorMessage ?? "Activity failed."}";
+            }
+
+            if (!string.IsNullOrWhiteSpace(capturedConsoleOutput))
+            {
+                await instanceRepository.SaveStepExecutionLogAsync(
+                    payload.InstanceId,
+                    claimedStep.StepId,
+                    claimedStep.Attempt,
+                    activityResult.IsSuccess,
+                    capturedConsoleOutput,
+                    _clock.UtcNow,
+                    executionCts.Token);
+            }
+
             if (activityResult.IsSuccess)
             {
                 await instanceRepository.MarkStepSucceededAsync(
@@ -185,11 +204,30 @@ public sealed class WorkflowWorker : BackgroundService
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
+            await instanceRepository.SaveStepExecutionLogAsync(
+                payload.InstanceId,
+                claimedStep.StepId,
+                claimedStep.Attempt,
+                false,
+                "Step execution timed out before completion.",
+                _clock.UtcNow,
+                CancellationToken.None);
+
             await HandleFailureAsync(instanceRepository, payload, claimedStep, "Step timed out.", true, CancellationToken.None);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Step execution failed for {InstanceId}/{StepId}", payload.InstanceId, payload.StepId);
+
+            await instanceRepository.SaveStepExecutionLogAsync(
+                payload.InstanceId,
+                claimedStep.StepId,
+                claimedStep.Attempt,
+                false,
+                $"Engine execution failed before activity completion.{Environment.NewLine}{ex}",
+                _clock.UtcNow,
+                CancellationToken.None);
+
             await HandleFailureAsync(instanceRepository, payload, claimedStep, ex.Message, true, CancellationToken.None);
         }
         finally
@@ -216,7 +254,8 @@ public sealed class WorkflowWorker : BackgroundService
         var policy = claimedStep.StepDefinition.RetryPolicy;
         var failedAttempt = claimedStep.Attempt;
         var hasAttemptsRemaining = failedAttempt < policy.MaxAttempts;
-        var shouldRetry = retryable && hasAttemptsRemaining;
+        var abortWorkflow = claimedStep.StepDefinition.AbortOnFail;
+        var shouldRetry = !abortWorkflow && retryable && hasAttemptsRemaining;
 
         var outboxMessages = new List<OutboxMessageRecord>();
         DateTimeOffset? nextAttemptAt = null;
@@ -233,6 +272,7 @@ public sealed class WorkflowWorker : BackgroundService
             _workerId,
             error,
             shouldRetry,
+            abortWorkflow,
             nextAttemptAt,
             _clock.UtcNow,
             outboxMessages,

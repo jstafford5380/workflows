@@ -64,9 +64,17 @@ public sealed class SeedProvisionSkeletonEndpoint : EndpointWithoutRequest<Workf
             return;
         }
 
-        await _engine.RegisterWorkflowDefinitionAsync(definition, ct);
-        await HttpContext.Response.WriteAsJsonAsync(
-            new WorkflowVersionResponse(definition.Name, definition.Version),
-            cancellationToken: ct);
+        try
+        {
+            await _engine.RegisterWorkflowDefinitionAsync(definition, ct);
+            await HttpContext.Response.WriteAsJsonAsync(
+                new WorkflowVersionResponse(definition.Name, definition.Version),
+                cancellationToken: ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            HttpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await HttpContext.Response.WriteAsJsonAsync(new ApiErrorResponse(ex.Message), cancellationToken: ct);
+        }
     }
 }

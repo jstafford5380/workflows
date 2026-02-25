@@ -33,7 +33,18 @@ public sealed record WorkflowStepDefinition
 
     public WaitForEventDefinition? WaitForEvent { get; init; }
 
+    public IReadOnlyList<ScriptParameterDefinition> ScriptParameters { get; init; } = [];
+
+    public bool AbortOnFail { get; init; } = true;
+
     public Dictionary<string, bool> SafetyMetadata { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+public sealed record ScriptParameterDefinition
+{
+    public required string Name { get; init; }
+
+    public bool Required { get; init; } = true;
 }
 
 public sealed record RetryPolicyDefinition

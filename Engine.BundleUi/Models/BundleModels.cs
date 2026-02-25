@@ -31,3 +31,42 @@ public sealed record BundleRegisterResponse(
     string WorkflowName,
     int WorkflowVersion,
     DateTimeOffset RegisteredAt);
+
+public sealed record WorkflowDefinitionMetadata(
+    string Name,
+    int Version,
+    DateTimeOffset RegisteredAt);
+
+public sealed record WorkflowInstanceStep(
+    string StepId,
+    string DisplayName,
+    string Status,
+    int Attempt,
+    DateTimeOffset? StartedAt,
+    DateTimeOffset? FinishedAt,
+    IReadOnlyList<string> BlockedBy,
+    string? LastError,
+    IReadOnlyList<string> OutputKeys);
+
+public sealed record WorkflowInstanceChecklist(
+    Guid InstanceId,
+    string WorkflowName,
+    int WorkflowVersion,
+    string Status,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt,
+    IReadOnlyList<WorkflowInstanceStep> Steps);
+
+public sealed record StepExecutionLog(
+    int Attempt,
+    bool IsSuccess,
+    string ConsoleOutput,
+    DateTimeOffset CreatedAt);
+
+public sealed record WorkflowInstanceSummary(
+    Guid InstanceId,
+    string WorkflowName,
+    int WorkflowVersion,
+    string Status,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);

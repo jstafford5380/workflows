@@ -5,6 +5,7 @@ using Engine.Api.Bundles;
 using Engine.Persistence;
 using Engine.Runtime;
 using FastEndpoints;
+using FastEndpoints.Swagger;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -17,6 +18,16 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 });
 
 builder.Services.AddFastEndpoints();
+builder.Services.SwaggerDocument(options =>
+{
+    options.DocumentSettings = settings =>
+    {
+        settings.Title = "Provisioning Checklist Engine API";
+        settings.Version = "v1";
+        settings.Description =
+            "Durable workflow/checklist orchestration API for provisioning-style workflows and bundle registration.";
+    };
+});
 builder.Services.AddEnginePersistence(builder.Configuration);
 builder.Services.AddEngineActivities(builder.Configuration);
 builder.Services.AddEngineRuntime();
@@ -34,6 +45,7 @@ app.UseFastEndpoints(config =>
     config.Serializer.Options.WriteIndented = true;
     config.Serializer.Options.Converters.Add(new JsonStringEnumConverter());
 });
+app.UseSwaggerGen();
 
 await app.RunAsync();
 

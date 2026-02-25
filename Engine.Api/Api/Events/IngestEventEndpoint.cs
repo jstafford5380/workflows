@@ -1,5 +1,6 @@
 using Engine.Runtime.Contracts;
 using FastEndpoints;
+using Engine.Api.Api.Common;
 
 namespace Engine.Api.Api.Events;
 
@@ -27,9 +28,13 @@ public sealed class IngestEventEndpoint : Endpoint<IngestEventRequest, IngestEve
             s.RequestParam(r => r.Payload, "Arbitrary event payload object.");
             s.RequestParam(r => r.PayloadHash!, "Optional caller-provided payload hash for dedupe heuristics.");
             s.Response<IngestEventResponse>(StatusCodes.Status200OK, "Event accepted and processed.");
+            s.Response<ApiErrorResponse>(StatusCodes.Status400BadRequest, "Event request is invalid.");
         });
 
-        Description(b => b.Produces<IngestEventResponse>(StatusCodes.Status200OK, "application/json"));
+        Description(b => b
+            .Accepts<IngestEventRequest>("application/json")
+            .Produces<IngestEventResponse>(StatusCodes.Status200OK, "application/json")
+            .Produces<ApiErrorResponse>(StatusCodes.Status400BadRequest, "application/json"));
     }
 
     public override async Task HandleAsync(IngestEventRequest req, CancellationToken ct)

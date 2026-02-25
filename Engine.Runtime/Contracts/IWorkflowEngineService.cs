@@ -18,6 +18,10 @@ public interface IWorkflowEngineService
 
     Task<WorkflowInstanceChecklistView?> GetInstanceChecklistAsync(Guid instanceId, CancellationToken cancellationToken);
 
+    Task<IReadOnlyList<WorkflowInstanceSummaryView>> ListInstancesAsync(CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<StepExecutionLogView>> GetStepExecutionLogsAsync(Guid instanceId, string stepId, CancellationToken cancellationToken);
+
     Task<bool> CancelInstanceAsync(Guid instanceId, CancellationToken cancellationToken);
 
     Task<bool> RetryStepAsync(Guid instanceId, string stepId, CancellationToken cancellationToken);

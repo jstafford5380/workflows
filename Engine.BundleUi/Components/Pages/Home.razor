@@ -1,6 +1,8 @@
 @page "/"
+@implements IDisposable
 @using Engine.BundleUi.Models
 @using Engine.BundleUi.Services
+@using System.Text.Json.Nodes
 @inject BundleApiClient BundleApiClient
 
 <PageTitle>Bundle Studio</PageTitle>
@@ -9,6 +11,240 @@
     <section class="hero">
         <h1>Workflow Bundle Studio</h1>
         <p>Upload a workflow bundle ZIP, preview the workflow + scripts + execution plan, then register it.</p>
+    </section>
+
+    <section class="panel">
+        <div class="panel-header">
+            <h2>Registered Workflows</h2>
+            <button class="btn-secondary" @onclick="RefreshWorkflowsAsync" disabled="@IsLoadingWorkflows">Refresh</button>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(WorkflowsErrorMessage))
+        {
+            <div class="alert error">@WorkflowsErrorMessage</div>
+        }
+        else if (RegisteredWorkflows.Count == 0)
+        {
+            <p>No workflows registered yet.</p>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Version</th>
+                        <th>Registered</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var workflow in RegisteredWorkflows)
+                    {
+                        <tr>
+                            <td><strong>@workflow.Name</strong></td>
+                            <td>@workflow.Version</td>
+                            <td>@workflow.RegisteredAt.LocalDateTime</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+
+    <section class="panel">
+        <div class="panel-header">
+            <h2>Execute Workflow</h2>
+            @if (IsWatchingInstance)
+            {
+                <button class="btn-secondary" @onclick="StopWatching">Stop Watching</button>
+            }
+        </div>
+
+        <div class="field-row">
+            <label for="workflowSelect">Workflow Version</label>
+            <select id="workflowSelect" @bind="SelectedWorkflowIndex" disabled="@(IsBusy || RegisteredWorkflows.Count == 0)">
+                @if (RegisteredWorkflows.Count == 0)
+                {
+                    <option value="-1">No workflows available</option>
+                }
+                else
+                {
+                    @for (var i = 0; i < RegisteredWorkflows.Count; i++)
+                    {
+                        var workflow = RegisteredWorkflows[i];
+                        <option value="@i">@workflow.Name v@workflow.Version</option>
+                    }
+                }
+            </select>
+        </div>
+
+        <div class="field-row">
+            <label for="inputsJson">Inputs (JSON object)</label>
+            <textarea
+                id="inputsJson"
+                class="json-input"
+                @bind="WorkflowInputsJson"
+                disabled="@IsBusy"></textarea>
+        </div>
+
+        <div class="actions">
+            <button class="btn-primary" @onclick="ExecuteWorkflowAsync" disabled="@(IsBusy || SelectedWorkflowIndex < 0)">Start Workflow</button>
+            @if (CurrentInstance is not null)
+            {
+                <button class="btn-secondary" @onclick="RefreshCurrentInstanceAsync" disabled="@IsBusy">Refresh Progress</button>
+                @if (!IsTerminalStatus(CurrentInstance.Status))
+                {
+                    <button class="btn-danger" @onclick="CancelCurrentInstanceAsync" disabled="@IsBusy">Stop Workflow</button>
+                }
+            }
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(ExecutionErrorMessage))
+        {
+            <div class="alert error">@ExecutionErrorMessage</div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(ExecutionSuccessMessage))
+        {
+            <div class="alert success">@ExecutionSuccessMessage</div>
+        }
+
+        @if (CurrentInstance is not null)
+        {
+            <div class="instance-meta">
+                <div class="meta-line">Instance: <code>@CurrentInstance.InstanceId</code></div>
+                <div class="meta-line">Workflow: <strong>@($"{CurrentInstance.WorkflowName} v{CurrentInstance.WorkflowVersion}")</strong></div>
+                <div class="meta-line">Status: <span class="status-pill @StatusClass(CurrentInstance.Status)">@CurrentInstance.Status</span></div>
+                <div class="meta-line">Updated: <strong>@CurrentInstance.UpdatedAt.LocalDateTime</strong></div>
+            </div>
+
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>Step</th>
+                        <th>Status</th>
+                        <th>Attempt</th>
+                        <th>Started</th>
+                        <th>Finished</th>
+                        <th>Blocked By</th>
+                        <th>Error</th>
+                        <th>History</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var step in CurrentInstance.Steps)
+                    {
+                        <tr>
+                            <td>
+                                <div class="step-name">@step.DisplayName</div>
+                                <code>@step.StepId</code>
+                            </td>
+                            <td><span class="status-pill @StatusClass(step.Status)">@step.Status</span></td>
+                            <td>@step.Attempt</td>
+                            <td>@(step.StartedAt?.LocalDateTime.ToString() ?? "-")</td>
+                            <td>@(step.FinishedAt?.LocalDateTime.ToString() ?? "-")</td>
+                            <td>@(step.BlockedBy.Count == 0 ? "-" : string.Join(", ", step.BlockedBy))</td>
+                            <td>@(string.IsNullOrWhiteSpace(step.LastError) ? "-" : step.LastError)</td>
+                            <td>
+                                <button class="btn-secondary" @onclick="() => LoadStepLogsAsync(step.StepId)" disabled="@IsBusy">
+                                    View Logs
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(LogsErrorMessage))
+            {
+                <div class="alert error">@LogsErrorMessage</div>
+            }
+
+            @if (SelectedStepLogsStepId is not null)
+            {
+                <section class="step-logs">
+                    <div class="panel-header">
+                        <h3>Step Logs: @SelectedStepLogsStepId</h3>
+                        <button class="btn-secondary" @onclick="ClearStepLogs" disabled="@IsBusy">Close</button>
+                    </div>
+
+                    @if (IsLoadingStepLogs)
+                    {
+                        <p>Loading logs...</p>
+                    }
+                    else if (SelectedStepLogs.Count == 0)
+                    {
+                        <p>No logs found for this step in the last 30 days.</p>
+                    }
+                    else
+                    {
+                        @foreach (var log in SelectedStepLogs)
+                        {
+                            <div class="log-entry">
+                                <div class="meta-line">
+                                    Attempt <strong>@log.Attempt</strong> |
+                                    Status <span class="status-pill @(log.IsSuccess ? "succeeded" : "failed")">@(log.IsSuccess ? "Succeeded" : "Failed")</span> |
+                                    Recorded <strong>@log.CreatedAt.LocalDateTime</strong>
+                                </div>
+                                <pre>@log.ConsoleOutput</pre>
+                            </div>
+                        }
+                    }
+                </section>
+            }
+        }
+    </section>
+
+    <section class="panel">
+        <div class="panel-header">
+            <h2>Workflow Runs</h2>
+            <button class="btn-secondary" @onclick="RefreshRunsAsync" disabled="@IsLoadingRuns">Refresh</button>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(RunsErrorMessage))
+        {
+            <div class="alert error">@RunsErrorMessage</div>
+        }
+        else if (WorkflowRuns.Count == 0)
+        {
+            <p>No runs found.</p>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>Instance</th>
+                        <th>Workflow</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                        <th>Updated</th>
+                        <th>Action</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var run in WorkflowRuns)
+                    {
+                        <tr>
+                            <td><code>@run.InstanceId</code></td>
+                            <td><strong>@($"{run.WorkflowName} v{run.WorkflowVersion}")</strong></td>
+                            <td><span class="status-pill @StatusClass(run.Status)">@run.Status</span></td>
+                            <td>@run.CreatedAt.LocalDateTime</td>
+                            <td>@run.UpdatedAt.LocalDateTime</td>
+                            <td>
+                                <button class="btn-secondary" @onclick="() => OpenRunAsync(run.InstanceId)" disabled="@IsBusy">Open</button>
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
     </section>
 
     <section class="panel upload-panel">
@@ -165,11 +401,56 @@
 
     private BundleRegisterResponse? Registration { get; set; }
 
+    private IReadOnlyList<WorkflowDefinitionMetadata> RegisteredWorkflows { get; set; } = [];
+
+    private WorkflowInstanceChecklist? CurrentInstance { get; set; }
+
+    private string WorkflowInputsJson { get; set; } = "{}";
+
+    private int SelectedWorkflowIndex { get; set; } = -1;
+
     private bool IsBusy { get; set; }
+
+    private bool IsLoadingWorkflows { get; set; }
+
+    private bool IsLoadingRuns { get; set; }
+
+    private bool IsWatchingInstance { get; set; }
 
     private string? ErrorMessage { get; set; }
 
+    private string? WorkflowsErrorMessage { get; set; }
+
+    private string? RunsErrorMessage { get; set; }
+
+    private string? ExecutionErrorMessage { get; set; }
+
+    private string? ExecutionSuccessMessage { get; set; }
+
     private string? SuccessMessage { get; set; }
+
+    private bool IsLoadingStepLogs { get; set; }
+
+    private string? LogsErrorMessage { get; set; }
+
+    private string? SelectedStepLogsStepId { get; set; }
+
+    private IReadOnlyList<StepExecutionLog> SelectedStepLogs { get; set; } = [];
+
+    private IReadOnlyList<WorkflowInstanceSummary> WorkflowRuns { get; set; } = [];
+
+    private CancellationTokenSource? _watchCancellationSource;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshWorkflowsAsync();
+        await RefreshRunsAsync();
+    }
+
+    public void Dispose()
+    {
+        StopWatching();
+    }
 
     private void OnFileSelected(InputFileChangeEventArgs eventArgs)
     {
@@ -207,6 +488,7 @@
         await RunBusyAsync(async cancellationToken =>
         {
             Registration = await BundleApiClient.RegisterPreviewAsync(Preview.PreviewId, cancellationToken);
+            await RefreshWorkflowsAsync();
             SuccessMessage =
                 $"Registered bundle {Registration.BundleId} as workflow {Registration.WorkflowName} v{Registration.WorkflowVersion}.";
             ErrorMessage = null;
@@ -232,6 +514,275 @@
         {
             IsBusy = false;
         }
+    }
+
+    private async Task ExecuteWorkflowAsync()
+    {
+        var selected = GetSelectedWorkflow();
+        if (selected is null)
+        {
+            ExecutionErrorMessage = "Select a workflow version to execute.";
+            return;
+        }
+
+        await RunBusyAsync(async cancellationToken =>
+        {
+            var inputsNode = JsonNode.Parse(WorkflowInputsJson);
+            if (inputsNode is not JsonObject inputsObject)
+            {
+                throw new InvalidOperationException("Inputs must be a valid JSON object.");
+            }
+
+            CurrentInstance = await BundleApiClient.StartWorkflowInstanceAsync(
+                selected.Name,
+                inputsObject,
+                selected.Version,
+                cancellationToken);
+
+            await RefreshRunsAsync();
+            ClearStepLogs();
+            ExecutionErrorMessage = null;
+            ExecutionSuccessMessage = $"Started workflow instance {CurrentInstance.InstanceId}.";
+            StartWatching(CurrentInstance.InstanceId);
+        });
+    }
+
+    private async Task RefreshCurrentInstanceAsync()
+    {
+        if (CurrentInstance is null)
+        {
+            return;
+        }
+
+        await RunBusyAsync(async cancellationToken =>
+        {
+            CurrentInstance = await BundleApiClient.GetWorkflowInstanceAsync(CurrentInstance.InstanceId, cancellationToken);
+            ExecutionErrorMessage = null;
+        });
+    }
+
+    private async Task CancelCurrentInstanceAsync()
+    {
+        if (CurrentInstance is null)
+        {
+            return;
+        }
+
+        await RunBusyAsync(async cancellationToken =>
+        {
+            await BundleApiClient.CancelWorkflowInstanceAsync(CurrentInstance.InstanceId, cancellationToken);
+            CurrentInstance = await BundleApiClient.GetWorkflowInstanceAsync(CurrentInstance.InstanceId, cancellationToken);
+            await RefreshRunsAsync();
+            ExecutionErrorMessage = null;
+            ExecutionSuccessMessage = $"Workflow instance {CurrentInstance.InstanceId} has been canceled.";
+        });
+    }
+
+    private async Task LoadStepLogsAsync(string stepId)
+    {
+        if (CurrentInstance is null || string.IsNullOrWhiteSpace(stepId))
+        {
+            return;
+        }
+
+        IsLoadingStepLogs = true;
+        LogsErrorMessage = null;
+        SelectedStepLogsStepId = stepId;
+        SelectedStepLogs = [];
+
+        using var cancellationSource = new CancellationTokenSource();
+        try
+        {
+            var logs = await BundleApiClient.GetStepExecutionLogsAsync(CurrentInstance.InstanceId, stepId, cancellationSource.Token);
+            SelectedStepLogs = logs
+                .OrderByDescending(x => x.Attempt)
+                .ThenByDescending(x => x.CreatedAt)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            LogsErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsLoadingStepLogs = false;
+        }
+    }
+
+    private void ClearStepLogs()
+    {
+        SelectedStepLogsStepId = null;
+        SelectedStepLogs = [];
+        LogsErrorMessage = null;
+        IsLoadingStepLogs = false;
+    }
+
+    private async Task RefreshWorkflowsAsync()
+    {
+        IsLoadingWorkflows = true;
+        WorkflowsErrorMessage = null;
+
+        using var cancellationSource = new CancellationTokenSource();
+        try
+        {
+            var workflows = await BundleApiClient.GetRegisteredWorkflowsAsync(cancellationSource.Token);
+            RegisteredWorkflows = workflows
+                .OrderByDescending(x => x.RegisteredAt)
+                .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (RegisteredWorkflows.Count == 0)
+            {
+                SelectedWorkflowIndex = -1;
+            }
+            else if (SelectedWorkflowIndex < 0 || SelectedWorkflowIndex >= RegisteredWorkflows.Count)
+            {
+                SelectedWorkflowIndex = 0;
+            }
+        }
+        catch (Exception ex)
+        {
+            WorkflowsErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsLoadingWorkflows = false;
+        }
+    }
+
+    private async Task RefreshRunsAsync()
+    {
+        IsLoadingRuns = true;
+        RunsErrorMessage = null;
+
+        using var cancellationSource = new CancellationTokenSource();
+        try
+        {
+            var runs = await BundleApiClient.GetWorkflowInstancesAsync(cancellationSource.Token);
+            WorkflowRuns = runs
+                .OrderByDescending(x => x.CreatedAt)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            RunsErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsLoadingRuns = false;
+        }
+    }
+
+    private async Task OpenRunAsync(Guid instanceId)
+    {
+        await RunBusyAsync(async cancellationToken =>
+        {
+            var instance = await BundleApiClient.GetWorkflowInstanceAsync(instanceId, cancellationToken);
+            CurrentInstance = instance;
+            ClearStepLogs();
+            ExecutionErrorMessage = null;
+            ExecutionSuccessMessage = $"Opened workflow instance {instance.InstanceId}.";
+
+            if (IsTerminalStatus(instance.Status))
+            {
+                StopWatching();
+            }
+            else
+            {
+                StartWatching(instance.InstanceId);
+            }
+        });
+    }
+
+    private WorkflowDefinitionMetadata? GetSelectedWorkflow()
+    {
+        if (SelectedWorkflowIndex < 0 || SelectedWorkflowIndex >= RegisteredWorkflows.Count)
+        {
+            return null;
+        }
+
+        return RegisteredWorkflows[SelectedWorkflowIndex];
+    }
+
+    private void StartWatching(Guid instanceId)
+    {
+        StopWatching();
+        IsWatchingInstance = true;
+        _watchCancellationSource = new CancellationTokenSource();
+        _ = WatchInstanceAsync(instanceId, _watchCancellationSource.Token);
+    }
+
+    private async Task WatchInstanceAsync(Guid instanceId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                var instance = await BundleApiClient.GetWorkflowInstanceAsync(instanceId, cancellationToken);
+                await InvokeAsync(() =>
+                {
+                    CurrentInstance = instance;
+                    ExecutionErrorMessage = null;
+                    StateHasChanged();
+                });
+
+                if (IsTerminalStatus(instance.Status))
+                {
+                    break;
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            await InvokeAsync(() =>
+            {
+                ExecutionErrorMessage = $"Failed to refresh instance status: {ex.Message}";
+                StateHasChanged();
+            });
+        }
+        finally
+        {
+            await InvokeAsync(() =>
+            {
+                IsWatchingInstance = false;
+                StateHasChanged();
+            });
+        }
+    }
+
+    private void StopWatching()
+    {
+        _watchCancellationSource?.Cancel();
+        _watchCancellationSource?.Dispose();
+        _watchCancellationSource = null;
+        IsWatchingInstance = false;
+    }
+
+    private static bool IsTerminalStatus(string status)
+    {
+        return status.Equals("Succeeded", StringComparison.OrdinalIgnoreCase)
+               || status.Equals("Failed", StringComparison.OrdinalIgnoreCase)
+               || status.Equals("Canceled", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string StatusClass(string status)
+    {
+        return status.ToLowerInvariant() switch
+        {
+            "running" => "running",
+            "runnable" => "runnable",
+            "waiting" => "waiting",
+            "succeeded" => "succeeded",
+            "failed" => "failed",
+            "canceled" => "canceled",
+            "aborted" => "aborted",
+            _ => "pending"
+        };
     }
 
     private static string FormatBytes(long size)

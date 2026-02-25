@@ -63,18 +63,29 @@ public sealed record WorkQueueItemRecord(
     int DequeueCount,
     DateTimeOffset? CompletedAt);
 
+public sealed record StepExecutionLogRecord(
+    Guid LogId,
+    Guid InstanceId,
+    string StepId,
+    int Attempt,
+    bool IsSuccess,
+    string ConsoleOutput,
+    DateTimeOffset CreatedAt);
+
 public sealed record ActivityExecutionRequest(
     Guid InstanceId,
     string StepId,
     string ActivityRef,
     JsonObject Inputs,
-    string IdempotencyKey);
+    string IdempotencyKey,
+    IReadOnlyList<ScriptParameterDefinition> ScriptParameters);
 
 public sealed record ActivityExecutionResult(
     bool IsSuccess,
     JsonObject Outputs,
     string? ErrorMessage,
-    bool IsRetryable = true);
+    bool IsRetryable = true,
+    string? ConsoleOutput = null);
 
 public sealed record ExternalEventEnvelope(
     string EventId,
@@ -106,3 +117,17 @@ public sealed record WorkflowInstanceChecklistView(
     DateTimeOffset UpdatedAt,
     JsonObject Inputs,
     IReadOnlyList<ChecklistStepView> Steps);
+
+public sealed record WorkflowInstanceSummaryView(
+    Guid InstanceId,
+    string WorkflowName,
+    int WorkflowVersion,
+    WorkflowInstanceStatus Status,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
+public sealed record StepExecutionLogView(
+    int Attempt,
+    bool IsSuccess,
+    string ConsoleOutput,
+    DateTimeOffset CreatedAt);

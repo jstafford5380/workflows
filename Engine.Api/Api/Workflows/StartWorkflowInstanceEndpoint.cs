@@ -31,6 +31,7 @@ public sealed class StartWorkflowInstanceEndpoint : Endpoint<StartWorkflowInstan
         });
 
         Description(b => b
+            .Accepts<StartWorkflowInstanceRequest>("application/json")
             .Produces<WorkflowInstanceChecklistResponse>(StatusCodes.Status201Created, "application/json")
             .Produces<ApiErrorResponse>(StatusCodes.Status400BadRequest, "application/json"));
     }
@@ -46,14 +47,22 @@ public sealed class StartWorkflowInstanceEndpoint : Endpoint<StartWorkflowInstan
             return;
         }
 
-        var view = await _engine.StartWorkflowAsync(
-            req.WorkflowName,
-            req.Inputs ?? new JsonObject(),
-            req.Version,
-            ct);
+        try
+        {
+            var view = await _engine.StartWorkflowAsync(
+                req.WorkflowName,
+                req.Inputs ?? new JsonObject(),
+                req.Version,
+                ct);
 
-        HttpContext.Response.StatusCode = StatusCodes.Status201Created;
-        HttpContext.Response.Headers.Location = $"/instances/{view.InstanceId}";
-        await HttpContext.Response.WriteAsJsonAsync(WorkflowInstanceChecklistResponse.FromModel(view), cancellationToken: ct);
+            HttpContext.Response.StatusCode = StatusCodes.Status201Created;
+            HttpContext.Response.Headers.Location = $"/instances/{view.InstanceId}";
+            await HttpContext.Response.WriteAsJsonAsync(WorkflowInstanceChecklistResponse.FromModel(view), cancellationToken: ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            HttpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await HttpContext.Response.WriteAsJsonAsync(new ApiErrorResponse(ex.Message), cancellationToken: ct);
+        }
     }
 }

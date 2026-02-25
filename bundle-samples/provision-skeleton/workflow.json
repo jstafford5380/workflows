@@ -11,6 +11,9 @@
       "inputs": {
         "projectId": { "binding": "$.inputs.projectId" }
       },
+      "scriptParameters": [
+        { "name": "projectId", "required": true }
+      ],
       "outputsSchema": ["projectNumber"],
       "retryPolicy": {
         "maxAttempts": 3,
@@ -18,6 +21,7 @@
         "maxDelaySeconds": 30,
         "backoffFactor": 2.0
       },
+      "abortOnFail": true,
       "timeoutSeconds": 60,
       "safetyMetadata": {
         "createsResources": true,
@@ -40,6 +44,7 @@
         "eventType": "approval",
         "correlationKeyExpression": "$.instanceId"
       },
+      "abortOnFail": true,
       "safetyMetadata": {
         "createsResources": false,
         "changesIam": false
@@ -52,6 +57,9 @@
       "inputs": {
         "projectNumber": { "binding": "$.steps.CreateProject.outputs.projectNumber" }
       },
+      "scriptParameters": [
+        { "name": "projectNumber", "required": true }
+      ],
       "outputsSchema": ["serviceAccountCount"],
       "retryPolicy": {
         "maxAttempts": 3,
@@ -59,6 +67,7 @@
         "maxDelaySeconds": 30,
         "backoffFactor": 2.0
       },
+      "abortOnFail": true,
       "timeoutSeconds": 60,
       "safetyMetadata": {
         "createsResources": true,
@@ -74,6 +83,10 @@
         "approved": { "binding": "$.steps.RequestApproval.outputs.approved" },
         "serviceAccounts": { "binding": "$.steps.CreateServiceAccounts.outputs.serviceAccountCount" }
       },
+      "scriptParameters": [
+        { "name": "approved", "required": true },
+        { "name": "serviceAccounts", "required": true }
+      ],
       "outputsSchema": ["result"],
       "retryPolicy": {
         "maxAttempts": 3,
@@ -81,6 +94,7 @@
         "maxDelaySeconds": 30,
         "backoffFactor": 2.0
       },
+      "abortOnFail": true,
       "timeoutSeconds": 60,
       "safetyMetadata": {
         "createsResources": false,

@@ -170,9 +170,31 @@ public sealed class WorkflowEngineService : IWorkflowEngineService
             checklistSteps);
     }
 
+    public async Task<IReadOnlyList<WorkflowInstanceSummaryView>> ListInstancesAsync(CancellationToken cancellationToken)
+    {
+        var instances = await _instanceRepository.ListInstancesAsync(200, cancellationToken);
+        return instances
+            .Select(x => new WorkflowInstanceSummaryView(
+                x.InstanceId,
+                x.WorkflowName,
+                x.WorkflowVersion,
+                x.Status,
+                x.CreatedAt,
+                x.UpdatedAt))
+            .ToList();
+    }
+
     public Task<bool> CancelInstanceAsync(Guid instanceId, CancellationToken cancellationToken)
     {
         return _instanceRepository.TryCancelInstanceAsync(instanceId, _clock.UtcNow, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<StepExecutionLogView>> GetStepExecutionLogsAsync(Guid instanceId, string stepId, CancellationToken cancellationToken)
+    {
+        var logs = await _instanceRepository.GetStepExecutionLogsAsync(instanceId, stepId, _clock.UtcNow, cancellationToken);
+        return logs
+            .Select(x => new StepExecutionLogView(x.Attempt, x.IsSuccess, x.ConsoleOutput, x.CreatedAt))
+            .ToList();
     }
 
     public Task<EventIngestResult> IngestEventAsync(ExternalEventEnvelope externalEvent, CancellationToken cancellationToken)

@@ -17,7 +17,8 @@ public enum StepRunStatus
     Waiting = 3,
     Succeeded = 4,
     Failed = 5,
-    Canceled = 6
+    Canceled = 6,
+    Aborted = 7
 }
 
 public enum EventSubscriptionStatus

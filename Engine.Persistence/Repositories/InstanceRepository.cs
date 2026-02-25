@@ -12,6 +12,8 @@ namespace Engine.Persistence.Repositories;
 
 public sealed class InstanceRepository : IInstanceRepository
 {
+    private static readonly TimeSpan StepLogRetention = TimeSpan.FromDays(30);
+
     private readonly WorkflowDbContext _dbContext;
 
     public InstanceRepository(WorkflowDbContext dbContext)
@@ -62,6 +64,17 @@ public sealed class InstanceRepository : IInstanceRepository
         return entity is null ? null : ToRecord(entity);
     }
 
+    public async Task<IReadOnlyList<WorkflowInstanceRecord>> ListInstancesAsync(int take, CancellationToken cancellationToken)
+    {
+        var rows = await _dbContext.WorkflowInstances
+            .AsNoTracking()
+            .OrderByDescending(x => x.CreatedAt)
+            .Take(Math.Max(1, take))
+            .ToListAsync(cancellationToken);
+
+        return rows.Select(ToRecord).ToList();
+    }
+
     public async Task<IReadOnlyList<StepRunRecord>> GetStepRunsAsync(Guid instanceId, CancellationToken cancellationToken)
     {
         var rows = await _dbContext.StepRuns
@@ -71,6 +84,44 @@ public sealed class InstanceRepository : IInstanceRepository
             .ToListAsync(cancellationToken);
 
         return rows.Select(ToRecord).ToList();
+    }
+
+    public async Task<IReadOnlyList<StepExecutionLogRecord>> GetStepExecutionLogsAsync(
+        Guid instanceId,
+        string stepId,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var cutoff = now.Subtract(StepLogRetention);
+
+        var expiredLogs = await _dbContext.StepExecutionLogs
+            .Where(x => x.CreatedAt < cutoff)
+            .ToListAsync(cancellationToken);
+
+        if (expiredLogs.Count > 0)
+        {
+            _dbContext.StepExecutionLogs.RemoveRange(expiredLogs);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        var rows = await _dbContext.StepExecutionLogs
+            .AsNoTracking()
+            .Where(x => x.InstanceId == instanceId
+                        && x.StepId == stepId
+                        && x.CreatedAt >= cutoff)
+            .OrderByDescending(x => x.Attempt)
+            .ThenByDescending(x => x.CreatedAt)
+            .ToListAsync(cancellationToken);
+
+        return rows.Select(x => new StepExecutionLogRecord(
+                x.LogId,
+                x.InstanceId,
+                x.StepId,
+                x.Attempt,
+                x.IsSuccess,
+                x.ConsoleOutput,
+                x.CreatedAt))
+            .ToList();
     }
 
     public async Task<IReadOnlyList<StepDependencyRecord>> GetDependenciesAsync(Guid instanceId, CancellationToken cancellationToken)
@@ -232,6 +283,7 @@ public sealed class InstanceRepository : IInstanceRepository
         string leaseOwner,
         string error,
         bool shouldRetry,
+        bool abortWorkflow,
         DateTimeOffset? nextAttemptAt,
         DateTimeOffset now,
         IReadOnlyList<OutboxMessageRecord> newOutboxMessages,
@@ -257,7 +309,45 @@ public sealed class InstanceRepository : IInstanceRepository
         step.LeaseOwner = null;
         step.LeaseExpiresAt = null;
 
-        if (!shouldRetry)
+        if (abortWorkflow)
+        {
+            var instance = await _dbContext.WorkflowInstances
+                .SingleOrDefaultAsync(x => x.InstanceId == instanceId, cancellationToken);
+
+            if (instance is not null && instance.Status == WorkflowInstanceStatus.Running.ToString())
+            {
+                instance.Status = WorkflowInstanceStatus.Canceled.ToString();
+                instance.UpdatedAt = now;
+            }
+
+            var unfinishedSteps = await _dbContext.StepRuns
+                .Where(x => x.InstanceId == instanceId
+                            && x.StepId != stepId
+                            && x.Status != StepRunStatus.Succeeded.ToString()
+                            && x.Status != StepRunStatus.Failed.ToString()
+                            && x.Status != StepRunStatus.Aborted.ToString())
+                .ToListAsync(cancellationToken);
+
+            foreach (var unfinishedStep in unfinishedSteps)
+            {
+                unfinishedStep.Status = StepRunStatus.Aborted.ToString();
+                unfinishedStep.FinishedAt = now;
+                unfinishedStep.LeaseOwner = null;
+                unfinishedStep.LeaseExpiresAt = null;
+                unfinishedStep.NextAttemptAt = null;
+            }
+
+            var waitingSubscriptions = await _dbContext.EventSubscriptions
+                .Where(x => x.InstanceId == instanceId && x.Status == EventSubscriptionStatus.Waiting.ToString())
+                .ToListAsync(cancellationToken);
+
+            foreach (var waitingSubscription in waitingSubscriptions)
+            {
+                waitingSubscription.Status = EventSubscriptionStatus.Canceled.ToString();
+                waitingSubscription.FulfilledAt = now;
+            }
+        }
+        else if (!shouldRetry)
         {
             var instance = await _dbContext.WorkflowInstances
                 .SingleOrDefaultAsync(x => x.InstanceId == instanceId, cancellationToken);
@@ -272,6 +362,42 @@ public sealed class InstanceRepository : IInstanceRepository
         if (newOutboxMessages.Count > 0)
         {
             _dbContext.OutboxMessages.AddRange(newOutboxMessages.Select(ToEntity));
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        await tx.CommitAsync(cancellationToken);
+    }
+
+    public async Task SaveStepExecutionLogAsync(
+        Guid instanceId,
+        string stepId,
+        int attempt,
+        bool isSuccess,
+        string consoleOutput,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        await using var tx = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+        _dbContext.StepExecutionLogs.Add(new StepExecutionLogEntity
+        {
+            LogId = Guid.NewGuid(),
+            InstanceId = instanceId,
+            StepId = stepId,
+            Attempt = attempt,
+            IsSuccess = isSuccess,
+            ConsoleOutput = consoleOutput,
+            CreatedAt = now
+        });
+
+        var cutoff = now.Subtract(StepLogRetention);
+        var expiredLogs = await _dbContext.StepExecutionLogs
+            .Where(x => x.CreatedAt < cutoff)
+            .ToListAsync(cancellationToken);
+
+        if (expiredLogs.Count > 0)
+        {
+            _dbContext.StepExecutionLogs.RemoveRange(expiredLogs);
         }
 
         await _dbContext.SaveChangesAsync(cancellationToken);
@@ -300,15 +426,16 @@ public sealed class InstanceRepository : IInstanceRepository
             .Where(x => x.InstanceId == instanceId
                         && x.Status != StepRunStatus.Succeeded.ToString()
                         && x.Status != StepRunStatus.Failed.ToString()
-                        && x.Status != StepRunStatus.Canceled.ToString())
+                        && x.Status != StepRunStatus.Aborted.ToString())
             .ToListAsync(cancellationToken);
 
         foreach (var step in steps)
         {
-            step.Status = StepRunStatus.Canceled.ToString();
+            step.Status = StepRunStatus.Aborted.ToString();
             step.FinishedAt = now;
             step.LeaseOwner = null;
             step.LeaseExpiresAt = null;
+            step.NextAttemptAt = null;
         }
 
         var waitingSubscriptions = await _dbContext.EventSubscriptions
@@ -339,7 +466,8 @@ public sealed class InstanceRepository : IInstanceRepository
             .SingleOrDefaultAsync(x => x.InstanceId == instanceId
                                        && x.StepId == stepId
                                        && (x.Status == StepRunStatus.Failed.ToString()
-                                           || x.Status == StepRunStatus.Canceled.ToString()), cancellationToken);
+                                           || x.Status == StepRunStatus.Canceled.ToString()
+                                           || x.Status == StepRunStatus.Aborted.ToString()), cancellationToken);
 
         if (step is null)
         {
@@ -356,7 +484,9 @@ public sealed class InstanceRepository : IInstanceRepository
         var instance = await _dbContext.WorkflowInstances
             .SingleOrDefaultAsync(x => x.InstanceId == instanceId, cancellationToken);
 
-        if (instance is not null && (instance.Status == WorkflowInstanceStatus.Failed.ToString() || instance.Status == WorkflowInstanceStatus.Paused.ToString()))
+        if (instance is not null && (instance.Status == WorkflowInstanceStatus.Failed.ToString()
+                                     || instance.Status == WorkflowInstanceStatus.Paused.ToString()
+                                     || instance.Status == WorkflowInstanceStatus.Canceled.ToString()))
         {
             instance.Status = WorkflowInstanceStatus.Running.ToString();
             instance.UpdatedAt = now;

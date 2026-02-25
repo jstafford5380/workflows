@@ -93,6 +93,34 @@ public static class WorkflowDefinitionValidator
                 {
                     errors.Add($"Step '{step.StepId}' WaitForEvent correlation key cannot depend on step outputs in v1.");
                 }
+
+                if (step.ScriptParameters.Count > 0)
+                {
+                    errors.Add($"Step '{step.StepId}' cannot define ScriptParameters when WaitForEvent is configured.");
+                }
+            }
+
+            if (step.ScriptParameters.Count > 0)
+            {
+                var seenParameters = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var parameter in step.ScriptParameters)
+                {
+                    if (string.IsNullOrWhiteSpace(parameter.Name))
+                    {
+                        errors.Add($"Step '{step.StepId}' has a script parameter with no name.");
+                        continue;
+                    }
+
+                    if (!seenParameters.Add(parameter.Name))
+                    {
+                        errors.Add($"Step '{step.StepId}' has duplicate script parameter '{parameter.Name}'.");
+                    }
+
+                    if (!step.Inputs.ContainsKey(parameter.Name))
+                    {
+                        errors.Add($"Step '{step.StepId}' script parameter '{parameter.Name}' must reference a matching key in Inputs.");
+                    }
+                }
             }
 
             foreach (var (inputName, inputValue) in step.Inputs)

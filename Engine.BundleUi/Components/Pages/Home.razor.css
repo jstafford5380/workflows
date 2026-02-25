@@ -41,6 +41,22 @@ label {
     color: var(--muted);
 }
 
+select,
+textarea {
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 0.6rem 0.7rem;
+    background: #fff;
+    color: inherit;
+    font-family: inherit;
+}
+
+.json-input {
+    min-height: 130px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
 .selected-file {
     color: var(--muted);
     margin-bottom: 0.7rem;
@@ -50,6 +66,18 @@ label {
     display: flex;
     gap: 0.6rem;
     flex-wrap: wrap;
+}
+
+.panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.8rem;
+    margin-bottom: 0.6rem;
+}
+
+.panel-header h2 {
+    margin: 0;
 }
 
 button {
@@ -67,6 +95,17 @@ button {
 
 .btn-accent {
     background: linear-gradient(120deg, #217a00, #00a65c);
+    color: #fff;
+}
+
+.btn-secondary {
+    background: #eef2fb;
+    border: 1px solid #c6d4ef;
+    color: #1f3e72;
+}
+
+.btn-danger {
+    background: #b43333;
     color: #fff;
 }
 
@@ -182,6 +221,94 @@ th {
 
 .meta-line {
     margin-top: 0.3rem;
+}
+
+.instance-meta {
+    margin-top: 0.9rem;
+    margin-bottom: 0.9rem;
+}
+
+.status-pill {
+    display: inline-block;
+    border-radius: 999px;
+    padding: 0.15rem 0.55rem;
+    font-size: 0.78rem;
+    border: 1px solid transparent;
+    font-weight: 600;
+}
+
+.status-pill.pending {
+    background: #f2f4f8;
+    border-color: #d1d7e3;
+    color: #31435f;
+}
+
+.status-pill.runnable {
+    background: #e8f4ff;
+    border-color: #a9cfee;
+    color: #14518e;
+}
+
+.status-pill.running {
+    background: #fff4de;
+    border-color: #f0cd82;
+    color: #7a5316;
+}
+
+.status-pill.waiting {
+    background: #efe7ff;
+    border-color: #c9b2f8;
+    color: #4d2c96;
+}
+
+.status-pill.succeeded {
+    background: #e8fff2;
+    border-color: #9fd4ba;
+    color: #196046;
+}
+
+.status-pill.failed {
+    background: #ffe8e8;
+    border-color: #de6a6a;
+    color: #7b1313;
+}
+
+.status-pill.canceled {
+    background: #f1f1f1;
+    border-color: #cdcdcd;
+    color: #505050;
+}
+
+.status-pill.aborted {
+    background: #f4f0f0;
+    border-color: #b7a2a2;
+    color: #5f4d4d;
+}
+
+.step-logs {
+    margin-top: 1rem;
+    border-top: 1px solid var(--border);
+    padding-top: 1rem;
+}
+
+.log-entry {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.6rem;
+    background: #fff;
+    margin-top: 0.6rem;
+}
+
+.log-entry pre {
+    margin: 0.5rem 0 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 0.8rem;
+    background: #f7f9fc;
+    border: 1px solid #dde5f2;
+    border-radius: 8px;
+    padding: 0.6rem;
 }
 
 code {

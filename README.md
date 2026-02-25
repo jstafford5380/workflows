@@ -48,6 +48,54 @@ Runtime flow:
 
 - worker executes bundle steps via `ScriptActivityRunner` by resolving `bundle://...` into persisted bundle storage.
 
+### Script Output Contract
+
+Script activities now use an output file (similar to GitHub Actions output handling):
+
+- runner sets `OZ_OUTPUT` environment variable to a writable file path
+- scripts append outputs as `key=value` lines
+- runner reads `OZ_OUTPUT` and converts values into step outputs
+
+Example:
+
+```bash
+echo "projectNumber=p-123456789" >> "$OZ_OUTPUT"
+echo "serviceAccountCount=3" >> "$OZ_OUTPUT"
+```
+
+Multiline values are supported with heredoc syntax:
+
+```bash
+echo "notes<<EOF" >> "$OZ_OUTPUT"
+echo "line 1" >> "$OZ_OUTPUT"
+echo "line 2" >> "$OZ_OUTPUT"
+echo "EOF" >> "$OZ_OUTPUT"
+```
+
+Compatibility: if `OZ_OUTPUT` is empty, the runner still falls back to parsing stdout JSON for older scripts.
+
+### Script Input Parameters
+
+For script steps, you can define ordered positional arguments in `workflow.json`:
+
+```json
+"scriptParameters": [
+  { "name": "projectId", "required": true },
+  { "name": "region", "required": false }
+]
+```
+
+- `name` maps to a key in the step `inputs` object
+- order in `scriptParameters` is the order passed to the script (`$1`, `$2`, ...)
+- `required: true` is validated by the runner before script execution
+- if `scriptParameters` is omitted, runner keeps legacy mode and passes request JSON path as first argument
+
+Script console history:
+
+- full stdout/stderr is stored per script step attempt
+- logs are retained for 30 days and then purged by the runtime persistence path
+- fetch via `GET /instances/{instanceId}/steps/{stepId}/logs`
+
 ## Run Locally
 
 ```bash
@@ -97,10 +145,12 @@ Set UI API target in `Engine.BundleUi/appsettings.json`:
 
 Existing workflow endpoints remain:
 
+- `GET /instances`
 - `POST /workflows/{workflowName}/instances`
 - `GET /instances/{instanceId}`
 - `POST /instances/{instanceId}/cancel`
 - `POST /instances/{instanceId}/steps/{stepId}/retry`
+- `GET /instances/{instanceId}/steps/{stepId}/logs`
 - `POST /events`
 
 ## Sample Bundle

@@ -29,17 +29,26 @@ public sealed class RegisterWorkflowEndpoint : Endpoint<RegisterWorkflowRequest,
         });
 
         Description(b => b
+            .Accepts<RegisterWorkflowRequest>("application/json")
             .Produces<WorkflowVersionResponse>(StatusCodes.Status202Accepted, "application/json")
             .Produces<ApiErrorResponse>(StatusCodes.Status400BadRequest, "application/json"));
     }
 
     public override async Task HandleAsync(RegisterWorkflowRequest req, CancellationToken ct)
     {
-        var definition = req.ToDefinition();
-        await _engine.RegisterWorkflowDefinitionAsync(definition, ct);
+        try
+        {
+            var definition = req.ToDefinition();
+            await _engine.RegisterWorkflowDefinitionAsync(definition, ct);
 
-        HttpContext.Response.StatusCode = StatusCodes.Status202Accepted;
-        HttpContext.Response.Headers.Location = $"/workflows/{definition.Name}";
-        await HttpContext.Response.WriteAsJsonAsync(new WorkflowVersionResponse(definition.Name, definition.Version), cancellationToken: ct);
+            HttpContext.Response.StatusCode = StatusCodes.Status202Accepted;
+            HttpContext.Response.Headers.Location = $"/workflows/{definition.Name}";
+            await HttpContext.Response.WriteAsJsonAsync(new WorkflowVersionResponse(definition.Name, definition.Version), cancellationToken: ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            HttpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await HttpContext.Response.WriteAsJsonAsync(new ApiErrorResponse(ex.Message), cancellationToken: ct);
+        }
     }
 }

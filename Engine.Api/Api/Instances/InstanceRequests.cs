@@ -26,3 +26,14 @@ public sealed class RetryStepRequest
     [BindFrom("stepId")]
     public string StepId { get; init; } = string.Empty;
 }
+
+public sealed class GetStepLogsRequest
+{
+    [RouteParam]
+    [BindFrom("instanceId")]
+    public Guid InstanceId { get; init; }
+
+    [RouteParam]
+    [BindFrom("stepId")]
+    public string StepId { get; init; } = string.Empty;
+}

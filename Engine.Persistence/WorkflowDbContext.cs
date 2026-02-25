@@ -26,6 +26,8 @@ public sealed class WorkflowDbContext : DbContext
 
     public DbSet<WorkQueueItemEntity> WorkQueueItems => Set<WorkQueueItemEntity>();
 
+    public DbSet<StepExecutionLogEntity> StepExecutionLogs => Set<StepExecutionLogEntity>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -107,6 +109,15 @@ public sealed class WorkflowDbContext : DbContext
             entity.Property(e => e.Kind).HasMaxLength(100);
             entity.Property(e => e.PayloadJson).HasColumnType("text");
             entity.HasIndex(e => new { e.CompletedAt, e.AvailableAt, e.LeaseExpiresAt });
+        });
+
+        modelBuilder.Entity<StepExecutionLogEntity>(entity =>
+        {
+            entity.HasKey(e => e.LogId);
+            entity.Property(e => e.StepId).HasMaxLength(200);
+            entity.Property(e => e.ConsoleOutput).HasColumnType("text");
+            entity.HasIndex(e => new { e.InstanceId, e.StepId, e.Attempt }).IsUnique();
+            entity.HasIndex(e => e.CreatedAt);
         });
     }
 }

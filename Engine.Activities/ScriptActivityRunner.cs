@@ -57,11 +57,18 @@ public sealed class ScriptActivityRunner
         };
 
         var tempInputPath = Path.Combine(Path.GetTempPath(), $"activity-{Guid.NewGuid():N}.json");
+        var tempOutputPath = Path.Combine(Path.GetTempPath(), $"activity-output-{Guid.NewGuid():N}.txt");
         await File.WriteAllTextAsync(tempInputPath, requestPayload.ToJsonString(), cancellationToken);
+        await File.WriteAllTextAsync(tempOutputPath, string.Empty, cancellationToken);
+
+        if (!TryBuildOrderedArguments(request, out var orderedArguments, out var parameterError))
+        {
+            return new ActivityExecutionResult(false, new JsonObject(), parameterError, false);
+        }
 
         try
         {
-            var startInfo = BuildStartInfo(resolvedScriptPath, tempInputPath, request);
+            var startInfo = BuildStartInfo(resolvedScriptPath, tempInputPath, tempOutputPath, request, orderedArguments);
             using var process = new Process { StartInfo = startInfo };
 
             process.Start();
@@ -90,22 +97,26 @@ public sealed class ScriptActivityRunner
 
             if (process.ExitCode != 0)
             {
+                var consoleOutput = BuildConsoleOutput(stdout, stderr);
                 var errorMessage =
                     $"Script '{resolvedScriptPath}' exited with code {process.ExitCode}. stderr: {Truncate(stderr, 2000)} stdout: {Truncate(stdout, 2000)}";
                 _logger.LogWarning("{ErrorMessage}", errorMessage);
-                return new ActivityExecutionResult(false, new JsonObject(), errorMessage, true);
+                return new ActivityExecutionResult(false, new JsonObject(), errorMessage, true, consoleOutput);
+            }
+
+            var successfulConsoleOutput = BuildConsoleOutput(stdout, stderr);
+            var outputResult = await TryParseOutputFileAsync(tempOutputPath, cancellationToken);
+            if (outputResult is not null)
+            {
+                return outputResult with { ConsoleOutput = successfulConsoleOutput };
             }
 
             if (string.IsNullOrWhiteSpace(stdout))
             {
-                return new ActivityExecutionResult(
-                    false,
-                    new JsonObject(),
-                    $"Script '{resolvedScriptPath}' returned empty stdout; expected JSON.",
-                    false);
+                return new ActivityExecutionResult(true, new JsonObject(), null, true, successfulConsoleOutput);
             }
 
-            return ParseScriptOutput(stdout);
+            return ParseScriptOutput(stdout) with { ConsoleOutput = successfulConsoleOutput };
         }
         catch (Exception ex)
         {
@@ -115,6 +126,7 @@ public sealed class ScriptActivityRunner
         finally
         {
             TryDeleteFile(tempInputPath);
+            TryDeleteFile(tempOutputPath);
         }
     }
 
@@ -154,9 +166,15 @@ public sealed class ScriptActivityRunner
         return false;
     }
 
-    private ProcessStartInfo BuildStartInfo(string scriptPath, string inputPath, ActivityExecutionRequest request)
+    private ProcessStartInfo BuildStartInfo(
+        string scriptPath,
+        string inputPath,
+        string outputPath,
+        ActivityExecutionRequest request,
+        IReadOnlyList<string> orderedArguments)
     {
         ProcessStartInfo startInfo;
+        var useOrderedArguments = orderedArguments.Count > 0;
 
         var extension = Path.GetExtension(scriptPath);
         if (OperatingSystem.IsWindows())
@@ -167,13 +185,19 @@ public sealed class ScriptActivityRunner
                 startInfo.ArgumentList.Add("-NoProfile");
                 startInfo.ArgumentList.Add("-File");
                 startInfo.ArgumentList.Add(scriptPath);
-                startInfo.ArgumentList.Add(inputPath);
+                foreach (var argument in useOrderedArguments ? orderedArguments : new[] { inputPath })
+                {
+                    startInfo.ArgumentList.Add(argument);
+                }
             }
             else
             {
                 startInfo = new ProcessStartInfo("cmd.exe");
                 startInfo.ArgumentList.Add("/c");
-                startInfo.ArgumentList.Add($"\"{scriptPath}\" \"{inputPath}\"");
+                var commandParts = new List<string> { QuoteForCommand(scriptPath) };
+                var args = useOrderedArguments ? orderedArguments : new[] { inputPath };
+                commandParts.AddRange(args.Select(QuoteForCommand));
+                startInfo.ArgumentList.Add(string.Join(' ', commandParts));
             }
         }
         else
@@ -182,12 +206,18 @@ public sealed class ScriptActivityRunner
             {
                 startInfo = new ProcessStartInfo("/bin/sh");
                 startInfo.ArgumentList.Add(scriptPath);
-                startInfo.ArgumentList.Add(inputPath);
+                foreach (var argument in useOrderedArguments ? orderedArguments : new[] { inputPath })
+                {
+                    startInfo.ArgumentList.Add(argument);
+                }
             }
             else
             {
                 startInfo = new ProcessStartInfo(scriptPath);
-                startInfo.ArgumentList.Add(inputPath);
+                foreach (var argument in useOrderedArguments ? orderedArguments : new[] { inputPath })
+                {
+                    startInfo.ArgumentList.Add(argument);
+                }
             }
         }
 
@@ -201,8 +231,182 @@ public sealed class ScriptActivityRunner
         startInfo.Environment["WORKFLOW_ACTIVITY_REF"] = request.ActivityRef;
         startInfo.Environment["WORKFLOW_IDEMPOTENCY_KEY"] = request.IdempotencyKey;
         startInfo.Environment["WORKFLOW_INPUTS_JSON"] = request.Inputs.ToJsonString();
+        startInfo.Environment["WORKFLOW_INPUT_PATH"] = inputPath;
+        startInfo.Environment["OZ_OUTPUT"] = outputPath;
 
         return startInfo;
+    }
+
+    private static bool TryBuildOrderedArguments(
+        ActivityExecutionRequest request,
+        out IReadOnlyList<string> orderedArguments,
+        out string error)
+    {
+        orderedArguments = [];
+        error = string.Empty;
+
+        if (request.ScriptParameters.Count == 0)
+        {
+            return true;
+        }
+
+        var values = new List<string>(request.ScriptParameters.Count);
+        foreach (var parameter in request.ScriptParameters)
+        {
+            if (string.IsNullOrWhiteSpace(parameter.Name))
+            {
+                error = $"Script parameter name is required for step '{request.StepId}'.";
+                return false;
+            }
+
+            request.Inputs.TryGetPropertyValue(parameter.Name, out var rawValue);
+            if (rawValue is null)
+            {
+                if (parameter.Required)
+                {
+                    error =
+                        $"Required script parameter '{parameter.Name}' is missing for step '{request.StepId}'. Ensure workflow inputs and bindings provide this value.";
+                    return false;
+                }
+
+                values.Add(string.Empty);
+                continue;
+            }
+
+            values.Add(ConvertToArgument(rawValue));
+        }
+
+        orderedArguments = values;
+        return true;
+    }
+
+    private static string ConvertToArgument(JsonNode value)
+    {
+        if (value is JsonValue jsonValue)
+        {
+            try
+            {
+                return jsonValue.GetValue<string>();
+            }
+            catch (InvalidOperationException)
+            {
+            }
+            catch (FormatException)
+            {
+            }
+        }
+
+        return value.ToJsonString();
+    }
+
+    private static string QuoteForCommand(string value)
+    {
+        var escaped = value.Replace("\"", "\\\"", StringComparison.Ordinal);
+        return $"\"{escaped}\"";
+    }
+
+    private static async Task<ActivityExecutionResult?> TryParseOutputFileAsync(string outputPath, CancellationToken cancellationToken)
+    {
+        if (!File.Exists(outputPath))
+        {
+            return null;
+        }
+
+        var rawText = await File.ReadAllTextAsync(outputPath, cancellationToken);
+        if (string.IsNullOrWhiteSpace(rawText))
+        {
+            return null;
+        }
+
+        var parseResult = TryParseOutputLines(rawText);
+        if (!parseResult.IsSuccess)
+        {
+            return new ActivityExecutionResult(false, new JsonObject(), parseResult.Error, false);
+        }
+
+        return new ActivityExecutionResult(true, parseResult.Outputs!, null, true);
+    }
+
+    private static (bool IsSuccess, JsonObject? Outputs, string? Error) TryParseOutputLines(string rawText)
+    {
+        var outputs = new JsonObject();
+        var lines = rawText.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+
+        for (var index = 0; index < lines.Length; index++)
+        {
+            var line = lines[index];
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            var heredocIndex = line.IndexOf("<<", StringComparison.Ordinal);
+            if (heredocIndex > 0)
+            {
+                var name = line[..heredocIndex].Trim();
+                var marker = line[(heredocIndex + 2)..];
+                if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(marker))
+                {
+                    return (false, null, $"Invalid OZ_OUTPUT line '{line}'. Expected name<<MARKER.");
+                }
+
+                var valueLines = new List<string>();
+                var foundMarker = false;
+                for (index += 1; index < lines.Length; index++)
+                {
+                    if (string.Equals(lines[index], marker, StringComparison.Ordinal))
+                    {
+                        foundMarker = true;
+                        break;
+                    }
+
+                    valueLines.Add(lines[index]);
+                }
+
+                if (!foundMarker)
+                {
+                    return (false, null, $"Missing closing marker '{marker}' for OZ_OUTPUT key '{name}'.");
+                }
+
+                outputs[name] = CoerceOutputValue(string.Join('\n', valueLines));
+                continue;
+            }
+
+            var separatorIndex = line.IndexOf('=');
+            if (separatorIndex <= 0)
+            {
+                return (false, null, $"Invalid OZ_OUTPUT line '{line}'. Expected key=value.");
+            }
+
+            var key = line[..separatorIndex].Trim();
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                return (false, null, $"Invalid OZ_OUTPUT line '{line}'. Missing key.");
+            }
+
+            var value = line[(separatorIndex + 1)..];
+            outputs[key] = CoerceOutputValue(value);
+        }
+
+        return (true, outputs, null);
+    }
+
+    private static JsonNode? CoerceOutputValue(string value)
+    {
+        var trimmed = value.Trim();
+        if (trimmed.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            return JsonNode.Parse(trimmed);
+        }
+        catch (JsonException)
+        {
+            return value;
+        }
     }
 
     private static ActivityExecutionResult ParseScriptOutput(string stdout)
@@ -241,6 +445,11 @@ public sealed class ScriptActivityRunner
         }
 
         return new ActivityExecutionResult(success, outputs, errorMessage, retryable);
+    }
+
+    private static string BuildConsoleOutput(string stdout, string stderr)
+    {
+        return $"--- stdout ---{Environment.NewLine}{stdout}{Environment.NewLine}--- stderr ---{Environment.NewLine}{stderr}";
     }
 
     private string? ResolveMappedScriptPath(string configuredPath)

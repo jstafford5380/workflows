@@ -1,17 +1,11 @@
 #!/usr/bin/env sh
 set -eu
 
-REQUEST_FILE="${1:?request json path is required}"
+: "${OZ_OUTPUT:?OZ_OUTPUT env var is required}"
 
-if grep -Eq '"approved"[[:space:]]*:[[:space:]]*true' "$REQUEST_FILE"; then
-  APPROVED=true
-else
-  APPROVED=false
-fi
+APPROVED="${1}"
+SERVICE_ACCOUNTS="${2}"
 
-SERVICE_ACCOUNTS=$(awk -F'[: ,}]+' '/"serviceAccounts"[[:space:]]*:/ {print $3; exit}' "$REQUEST_FILE")
-if [ -z "$SERVICE_ACCOUNTS" ]; then
-  SERVICE_ACCOUNTS=0
-fi
-
-printf '{"result":"completed","approved":%s,"serviceAccounts":%s}\n' "$APPROVED" "$SERVICE_ACCOUNTS"
+printf 'result=completed\n' >> "$OZ_OUTPUT"
+printf 'approved=%s\n' "$APPROVED" >> "$OZ_OUTPUT"
+printf 'serviceAccounts=%s\n' "$SERVICE_ACCOUNTS" >> "$OZ_OUTPUT"
