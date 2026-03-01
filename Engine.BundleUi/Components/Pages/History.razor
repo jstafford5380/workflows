@@ -1,7 +1,11 @@
 @page "/history"
 @using Engine.BundleUi.Models
 @using Engine.BundleUi.Services
+@using System.Text
+@using System.Text.Json
+@using System.Text.Json.Nodes
 @inject BundleApiClient BundleApiClient
+@inject IJSRuntime JsRuntime
 
 <PageTitle>Run History</PageTitle>
 
@@ -10,6 +14,13 @@
         <h1>Workflow Run History</h1>
         <p>Browse workflow runs and inspect step-level execution logs.</p>
     </section>
+
+    @if (!string.IsNullOrWhiteSpace(ConsoleMessage))
+    {
+        <section class="panel">
+            <div class="alert success">@ConsoleMessage</div>
+        </section>
+    }
 
     <section class="panel">
         <div class="panel-header">
@@ -219,6 +230,12 @@
 
     private HashSet<Guid> CancelingRunInstanceIds { get; } = [];
 
+    private HashSet<Guid> RerunningInstanceIds { get; } = [];
+
+    private HashSet<Guid> CloningInstanceIds { get; } = [];
+
+    private HashSet<string> RetryingStepKeys { get; } = [];
+
     private Dictionary<Guid, WorkflowInstanceChecklist> RunDetailsByInstanceId { get; } = [];
 
     private Dictionary<Guid, string> RunDetailErrors { get; } = [];
@@ -230,6 +247,16 @@
     private Dictionary<string, IReadOnlyList<StepExecutionLog>> StepLogsByStepKey { get; } = new(StringComparer.Ordinal);
 
     private Dictionary<string, string> StepLogErrorsByStepKey { get; } = new(StringComparer.Ordinal);
+
+    private Dictionary<string, string> StepLogSearchByStepKey { get; } = new(StringComparer.Ordinal);
+
+    private Dictionary<string, int?> StepLogAttemptFilterByStepKey { get; } = new(StringComparer.Ordinal);
+
+    private string? ConsoleMessage { get; set; }
+
+    private Guid? ActiveCloneInstanceId { get; set; }
+
+    private string CloneInputsJson { get; set; } = "{\n}\n";
 
     private IReadOnlyList<WorkflowInstanceSummary> InProgressRuns => WorkflowRuns
         .Where(run => IsInProgressStatus(run.Status))
@@ -339,6 +366,148 @@
         }
     }
 
+    private async Task RerunRunAsync(WorkflowInstanceChecklist runDetail, bool cloneMode)
+    {
+        if (RerunningInstanceIds.Contains(runDetail.InstanceId))
+        {
+            return;
+        }
+
+        RerunningInstanceIds.Add(runDetail.InstanceId);
+        using var cancellationSource = new CancellationTokenSource();
+        try
+        {
+            var rerun = await BundleApiClient.StartWorkflowInstanceAsync(
+                runDetail.WorkflowName,
+                runDetail.Inputs,
+                runDetail.WorkflowVersion,
+                cancellationSource.Token);
+
+            ConsoleMessage = cloneMode
+                ? $"Cloned run started: {rerun.InstanceId:D}"
+                : $"Rerun started: {rerun.InstanceId:D}";
+
+            ExpandedRunIds.Add(rerun.InstanceId);
+            RunDetailsByInstanceId[rerun.InstanceId] = rerun;
+            await RefreshRunsAsync();
+        }
+        catch (Exception ex)
+        {
+            RunsErrorMessage = ex.Message;
+        }
+        finally
+        {
+            RerunningInstanceIds.Remove(runDetail.InstanceId);
+        }
+    }
+
+    private void OpenCloneEditor(WorkflowInstanceChecklist runDetail)
+    {
+        if (ActiveCloneInstanceId == runDetail.InstanceId)
+        {
+            CloseCloneEditor();
+            return;
+        }
+
+        ActiveCloneInstanceId = runDetail.InstanceId;
+        CloneInputsJson = runDetail.Inputs.ToJsonString(new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            WriteIndented = true
+        });
+        ConsoleMessage = null;
+    }
+
+    private void CloseCloneEditor()
+    {
+        ActiveCloneInstanceId = null;
+    }
+
+    private async Task StartClonedRunAsync(WorkflowInstanceChecklist runDetail)
+    {
+        if (CloningInstanceIds.Contains(runDetail.InstanceId))
+        {
+            return;
+        }
+
+        CloningInstanceIds.Add(runDetail.InstanceId);
+        try
+        {
+            JsonObject inputs;
+            try
+            {
+                inputs = JsonNode.Parse(CloneInputsJson)?.AsObject()
+                    ?? throw new InvalidOperationException("Clone inputs must be a JSON object.");
+            }
+            catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+            {
+                throw new InvalidOperationException("Clone inputs are invalid JSON. Provide a valid JSON object.", ex);
+            }
+
+            using var cancellationSource = new CancellationTokenSource();
+            var cloned = await BundleApiClient.StartWorkflowInstanceAsync(
+                runDetail.WorkflowName,
+                inputs,
+                runDetail.WorkflowVersion,
+                cancellationSource.Token);
+
+            ConsoleMessage = $"Cloned run started: {cloned.InstanceId:D}";
+            ActiveCloneInstanceId = null;
+            ExpandedRunIds.Add(cloned.InstanceId);
+            RunDetailsByInstanceId[cloned.InstanceId] = cloned;
+            await RefreshRunsAsync();
+        }
+        catch (Exception ex)
+        {
+            RunsErrorMessage = ex.Message;
+        }
+        finally
+        {
+            CloningInstanceIds.Remove(runDetail.InstanceId);
+        }
+    }
+
+    private async Task RetryStepAsync(Guid instanceId, string stepId)
+    {
+        var stepKey = BuildStepKey(instanceId, stepId);
+        if (RetryingStepKeys.Contains(stepKey))
+        {
+            return;
+        }
+
+        RetryingStepKeys.Add(stepKey);
+        using var cancellationSource = new CancellationTokenSource();
+        try
+        {
+            await BundleApiClient.RetryStepAsync(instanceId, stepId, cancellationSource.Token);
+            ConsoleMessage = $"Retry requested for step '{stepId}'.";
+            await EnsureRunDetailsLoadedAsync(instanceId, forceReload: true);
+            await RefreshRunsAsync();
+        }
+        catch (Exception ex)
+        {
+            StepLogErrorsByStepKey[stepKey] = ex.Message.Contains("(404)", StringComparison.Ordinal)
+                ? "Retry was rejected. Confirm the step is in Failed, Canceled, or Aborted status and refresh run details."
+                : ex.Message;
+        }
+        finally
+        {
+            RetryingStepKeys.Remove(stepKey);
+        }
+    }
+
+    private async Task CopyLogAsync(string content)
+    {
+        try
+        {
+            await JsRuntime.InvokeVoidAsync("navigator.clipboard.writeText", content);
+            ConsoleMessage = "Log copied to clipboard.";
+        }
+        catch
+        {
+            ConsoleMessage = "Clipboard copy failed in this browser context.";
+        }
+    }
+
     private async Task ToggleStepAsync(Guid instanceId, string stepId)
     {
         var stepKey = BuildStepKey(instanceId, stepId);
@@ -377,11 +546,126 @@
     }
 
     private RenderFragment RunDetailsMarkup(WorkflowInstanceChecklist runDetail) => @<div class="run-detail">
+        @{
+            var isCanceling = CancelingRunInstanceIds.Contains(runDetail.InstanceId);
+            var isRerunning = RerunningInstanceIds.Contains(runDetail.InstanceId);
+            var isCloning = CloningInstanceIds.Contains(runDetail.InstanceId);
+            var isCloneEditorOpen = ActiveCloneInstanceId == runDetail.InstanceId;
+            var runTimeline = BuildRunTimeline(runDetail);
+            var dagStages = BuildDagStages(runDetail);
+            var diagnostics = BuildDiagnostics(runDetail);
+        }
         <div class="instance-meta">
             <div class="meta-line">Instance: <code>@runDetail.InstanceId</code></div>
             <div class="meta-line">Workflow: <strong>@($"{runDetail.WorkflowName} v{runDetail.WorkflowVersion}")</strong></div>
             <div class="meta-line">Status: <span class="status-pill @StatusClass(runDetail.Status)">@runDetail.Status</span></div>
             <div class="meta-line">Updated: <strong>@runDetail.UpdatedAt.LocalDateTime</strong></div>
+        </div>
+
+        <div class="run-controls">
+            @if (IsInProgressStatus(runDetail.Status))
+            {
+                <button class="btn-danger" @onclick="() => CancelRunAsync(runDetail.InstanceId)" disabled="@isCanceling">
+                    <span class="btn-icon" aria-hidden="true">■</span>
+                    <span>@(isCanceling ? "Stopping..." : "Cancel Run")</span>
+                </button>
+            }
+            <button class="btn-secondary" @onclick="() => RerunRunAsync(runDetail, false)" disabled="@isRerunning">
+                <span class="btn-icon" aria-hidden="true">↻</span>
+                <span>@(isRerunning ? "Starting..." : "Rerun Same Inputs")</span>
+            </button>
+            <button class="btn-secondary" @onclick="() => OpenCloneEditor(runDetail)" disabled="@isCloning">
+                <span class="btn-icon" aria-hidden="true">⧉</span>
+                <span>@(isCloneEditorOpen ? "Close Clone Editor" : "Clone Run")</span>
+            </button>
+        </div>
+
+        @if (isCloneEditorOpen)
+        {
+            <div class="clone-editor">
+                <div class="field-inline">
+                    <label>Clone Inputs (JSON object)</label>
+                    <textarea class="json-input short" @bind="CloneInputsJson"></textarea>
+                </div>
+                <div class="action-buttons">
+                    <button class="btn-secondary" @onclick="() => StartClonedRunAsync(runDetail)" disabled="@isCloning">
+                        <span class="btn-icon" aria-hidden="true">▶</span>
+                        <span>@(isCloning ? "Starting..." : "Start Clone")</span>
+                    </button>
+                    <button class="btn-secondary" @onclick="CloseCloneEditor" disabled="@isCloning">Cancel</button>
+                </div>
+            </div>
+        }
+
+        <div class="run-console-grid">
+            <section class="console-panel">
+                <h3>Timeline</h3>
+                <div class="timeline-list">
+                    @foreach (var timelineEvent in runTimeline)
+                    {
+                        <div class="timeline-item">
+                            <span class="timeline-at">@timelineEvent.At.LocalDateTime</span>
+                            <span class="timeline-text">@timelineEvent.Text</span>
+                        </div>
+                    }
+                </div>
+            </section>
+
+            <section class="console-panel">
+                <h3>Dependency Graph</h3>
+                <div class="dag-stage-grid">
+                    @foreach (var stage in dagStages)
+                    {
+                        <div class="dag-stage">
+                            <div class="dag-stage-title">Stage @stage.Stage</div>
+                            <div class="dag-node-list">
+                                @foreach (var node in stage.Steps)
+                                {
+                                    <div class="dag-node">
+                                        <div class="dag-node-top">
+                                            <code>@node.StepId</code>
+                                            <span class="status-pill @StatusClass(node.Status)">@node.Status</span>
+                                        </div>
+                                        <div class="dag-node-deps">
+                                            Depends on: @(node.DependsOn.Count == 0 ? "None" : string.Join(", ", node.DependsOn))
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            </section>
+
+            <section class="console-panel">
+                <h3>Diagnostics</h3>
+                <div class="diagnostic-chips">
+                    <span class="diag-chip">Total Steps: @diagnostics.TotalSteps</span>
+                    <span class="diag-chip @(diagnostics.FailedSteps.Count == 0 ? "ok" : "warn")">Failed: @diagnostics.FailedSteps.Count</span>
+                    <span class="diag-chip @(diagnostics.WaitingSteps.Count == 0 ? "ok" : "warn")">Waiting: @diagnostics.WaitingSteps.Count</span>
+                    <span class="diag-chip @(diagnostics.BlockedSteps.Count == 0 ? "ok" : "warn")">Blocked: @diagnostics.BlockedSteps.Count</span>
+                </div>
+                @if (diagnostics.FailedSteps.Count > 0)
+                {
+                    <div class="diagnostic-list">
+                        <strong>Failures</strong>
+                        @foreach (var failure in diagnostics.FailedSteps)
+                        {
+                            <div>[@failure.StepId] @failure.Reason</div>
+                        }
+                    </div>
+                }
+                @if (diagnostics.BlockedSteps.Count > 0)
+                {
+                    <div class="diagnostic-list">
+                        <strong>Blocked Steps</strong>
+                        @foreach (var blocked in diagnostics.BlockedSteps)
+                        {
+                            <div>[@blocked.StepId] waiting on @string.Join(", ", blocked.DependsOn)</div>
+                        }
+                    </div>
+                }
+            </section>
         </div>
 
         <div class="accordion-list">
@@ -392,6 +676,12 @@
                 var stepLogs = StepLogsByStepKey.GetValueOrDefault(stepKey);
                 var stepLogError = StepLogErrorsByStepKey.GetValueOrDefault(stepKey);
                 var isLoadingStepLogs = LoadingStepLogKeys.Contains(stepKey);
+                var isRetryingStep = RetryingStepKeys.Contains(stepKey);
+                var canRetryStep = IsRetryableStepStatus(step.Status);
+                var attemptFilter = GetAttemptFilter(stepKey);
+                var searchTerm = GetLogSearch(stepKey);
+                var filteredLogs = GetFilteredLogs(stepKey, stepLogs);
+                var availableAttempts = GetAvailableAttempts(stepLogs);
 
                 <article class="accordion-item">
                     <button
@@ -409,12 +699,28 @@
                             <span><strong>Finished:</strong> @(step.FinishedAt?.LocalDateTime.ToString() ?? "-")</span>
                             <span><strong>Blocked By:</strong> @(step.BlockedBy.Count == 0 ? "-" : string.Join(", ", step.BlockedBy))</span>
                             <span><strong>Error:</strong> @(string.IsNullOrWhiteSpace(step.LastError) ? "-" : step.LastError)</span>
+                            @if (step.SafetyMetadata.Count > 0)
+                            {
+                                <span><strong>Safety:</strong> @GetSafetyFlagsText(step)</span>
+                            }
                         </div>
                     </button>
 
                     @if (stepExpanded)
                     {
                         <div class="accordion-body">
+                            <div class="step-controls">
+                                <button class="btn-secondary btn-sm" @onclick="() => RetryStepAsync(runDetail.InstanceId, step.StepId)" disabled="@(!canRetryStep || isRetryingStep)">
+                                    <span class="btn-icon" aria-hidden="true">⟳</span>
+                                    <span>@(!canRetryStep ? "Retry Unavailable" : isRetryingStep ? "Retrying..." : "Retry Step")</span>
+                                </button>
+                                @if (!canRetryStep)
+                                {
+                                    <span class="retention-note">Retry is available when step status is Failed, Canceled, or Aborted.</span>
+                                }
+                                <span class="retention-note">Log retention: 30 days</span>
+                            </div>
+
                             @if (isLoadingStepLogs)
                             {
                                 <p>Loading logs...</p>
@@ -429,16 +735,46 @@
                             }
                             else
                             {
-                                @foreach (var log in stepLogs)
-                                {
-                                    <div class="log-entry">
-                                        <div class="meta-line">
-                                            Attempt <strong>@log.Attempt</strong> |
-                                            Status <span class="status-pill @(log.IsSuccess ? "succeeded" : "failed")">@(log.IsSuccess ? "Succeeded" : "Failed")</span> |
-                                            Recorded <strong>@log.CreatedAt.LocalDateTime</strong>
-                                        </div>
-                                        <pre>@log.ConsoleOutput</pre>
+                                <div class="log-toolbar">
+                                    <div class="field-inline">
+                                        <label>Attempt</label>
+                                        <select value="@(attemptFilter?.ToString() ?? string.Empty)" @onchange="(e) => SetAttemptFilter(stepKey, e.Value?.ToString())">
+                                            <option value="">All attempts</option>
+                                            @foreach (var attempt in availableAttempts)
+                                            {
+                                                <option value="@attempt">@($"Attempt {attempt}")</option>
+                                            }
+                                        </select>
                                     </div>
+                                    <div class="field-inline grow">
+                                        <label>Search Logs</label>
+                                        <input type="text" value="@searchTerm" placeholder="Search console output..." @oninput="(e) => SetLogSearch(stepKey, e.Value?.ToString())" />
+                                    </div>
+                                </div>
+
+                                @if (filteredLogs.Count == 0)
+                                {
+                                    <p>No logs match the current filters.</p>
+                                }
+                                else
+                                {
+                                    @foreach (var log in filteredLogs)
+                                    {
+                                        <div class="log-entry">
+                                            <div class="meta-line log-meta">
+                                                <span>
+                                                    Attempt <strong>@log.Attempt</strong> |
+                                                    Status <span class="status-pill @(log.IsSuccess ? "succeeded" : "failed")">@(log.IsSuccess ? "Succeeded" : "Failed")</span> |
+                                                    Recorded <strong>@log.CreatedAt.LocalDateTime</strong>
+                                                </span>
+                                                <div class="log-actions">
+                                                    <button class="btn-secondary btn-sm" @onclick="() => CopyLogAsync(log.ConsoleOutput)">Copy</button>
+                                                    <a class="btn-secondary btn-sm as-link" download="@GetLogFileName(runDetail, step, log)" href="@BuildLogDownloadHref(log.ConsoleOutput)">Download</a>
+                                                </div>
+                                            </div>
+                                            <pre>@log.ConsoleOutput</pre>
+                                        </div>
+                                    }
                                 }
                             }
                         </div>
@@ -447,6 +783,206 @@
             }
         </div>
     </div>;
+
+    private IReadOnlyList<StepExecutionLog> GetFilteredLogs(string stepKey, IReadOnlyList<StepExecutionLog>? logs)
+    {
+        if (logs is null || logs.Count == 0)
+        {
+            return [];
+        }
+
+        var search = GetLogSearch(stepKey);
+        var attempt = GetAttemptFilter(stepKey);
+
+        return logs
+            .Where(log => !attempt.HasValue || log.Attempt == attempt.Value)
+            .Where(log => string.IsNullOrWhiteSpace(search)
+                          || log.ConsoleOutput.Contains(search, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    private IReadOnlyList<int> GetAvailableAttempts(IReadOnlyList<StepExecutionLog>? logs)
+    {
+        if (logs is null || logs.Count == 0)
+        {
+            return [];
+        }
+
+        return logs.Select(x => x.Attempt)
+            .Distinct()
+            .OrderDescending()
+            .ToList();
+    }
+
+    private void SetLogSearch(string stepKey, string? value)
+    {
+        var normalized = value?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            StepLogSearchByStepKey.Remove(stepKey);
+            return;
+        }
+
+        StepLogSearchByStepKey[stepKey] = normalized;
+    }
+
+    private string GetLogSearch(string stepKey)
+    {
+        return StepLogSearchByStepKey.GetValueOrDefault(stepKey, string.Empty);
+    }
+
+    private void SetAttemptFilter(string stepKey, string? rawValue)
+    {
+        if (int.TryParse(rawValue, out var attempt))
+        {
+            StepLogAttemptFilterByStepKey[stepKey] = attempt;
+            return;
+        }
+
+        StepLogAttemptFilterByStepKey.Remove(stepKey);
+    }
+
+    private int? GetAttemptFilter(string stepKey)
+    {
+        return StepLogAttemptFilterByStepKey.GetValueOrDefault(stepKey);
+    }
+
+    private static string GetSafetyFlagsText(WorkflowInstanceStep step)
+    {
+        return string.Join(", ",
+            step.SafetyMetadata
+                .Where(x => x.Value)
+                .Select(x => x.Key)
+                .DefaultIfEmpty("None"));
+    }
+
+    private static string BuildLogDownloadHref(string content)
+    {
+        return $"data:text/plain;charset=utf-8,{Uri.EscapeDataString(content)}";
+    }
+
+    private static string GetLogFileName(WorkflowInstanceChecklist run, WorkflowInstanceStep step, StepExecutionLog log)
+    {
+        return $"{run.InstanceId:D}-{step.StepId}-attempt-{log.Attempt}.log";
+    }
+
+    private static IReadOnlyList<TimelineEvent> BuildRunTimeline(WorkflowInstanceChecklist runDetail)
+    {
+        var events = new List<TimelineEvent>
+        {
+            new(runDetail.CreatedAt, "Run created"),
+            new(runDetail.UpdatedAt, $"Run updated ({runDetail.Status})")
+        };
+
+        foreach (var step in runDetail.Steps)
+        {
+            if (step.StartedAt.HasValue)
+            {
+                events.Add(new TimelineEvent(step.StartedAt.Value, $"Step '{step.StepId}' started"));
+            }
+
+            if (step.FinishedAt.HasValue)
+            {
+                events.Add(new TimelineEvent(step.FinishedAt.Value, $"Step '{step.StepId}' finished with {step.Status}"));
+            }
+        }
+
+        return events
+            .OrderBy(x => x.At)
+            .ToList();
+    }
+
+    private static IReadOnlyList<DagStage> BuildDagStages(WorkflowInstanceChecklist runDetail)
+    {
+        var steps = runDetail.Steps;
+        var stepById = steps.ToDictionary(x => x.StepId, StringComparer.OrdinalIgnoreCase);
+        var inDegree = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var outgoing = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var step in steps)
+        {
+            inDegree[step.StepId] = 0;
+            outgoing[step.StepId] = [];
+        }
+
+        foreach (var step in steps)
+        {
+            foreach (var dependsOn in step.DependsOn)
+            {
+                if (!stepById.ContainsKey(dependsOn))
+                {
+                    continue;
+                }
+
+                inDegree[step.StepId]++;
+                outgoing[dependsOn].Add(step.StepId);
+            }
+        }
+
+        var stages = new List<DagStage>();
+        var queue = new Queue<string>(inDegree.Where(x => x.Value == 0).Select(x => x.Key).OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
+        var remaining = new HashSet<string>(stepById.Keys, StringComparer.OrdinalIgnoreCase);
+        var stageNumber = 1;
+
+        while (queue.Count > 0)
+        {
+            var currentLevel = queue.ToList();
+            queue.Clear();
+
+            var currentSteps = currentLevel
+                .Where(stepId => stepById.ContainsKey(stepId))
+                .Select(stepId => stepById[stepId])
+                .OrderBy(step => step.StepId, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (currentSteps.Count > 0)
+            {
+                stages.Add(new DagStage(stageNumber, currentSteps));
+                stageNumber++;
+            }
+
+            foreach (var stepId in currentLevel)
+            {
+                remaining.Remove(stepId);
+                foreach (var dependent in outgoing.GetValueOrDefault(stepId, []))
+                {
+                    inDegree[dependent]--;
+                    if (inDegree[dependent] == 0)
+                    {
+                        queue.Enqueue(dependent);
+                    }
+                }
+            }
+        }
+
+        if (remaining.Count > 0)
+        {
+            // Fallback to avoid hiding steps if cycle/invalid references slip through.
+            stages.Add(new DagStage(stageNumber, remaining.Select(id => stepById[id]).ToList()));
+        }
+
+        return stages;
+    }
+
+    private static RunDiagnostics BuildDiagnostics(WorkflowInstanceChecklist runDetail)
+    {
+        var failed = runDetail.Steps
+            .Where(x => x.Status.Equals("Failed", StringComparison.OrdinalIgnoreCase))
+            .Select(x => new DiagnosticFailure(x.StepId, string.IsNullOrWhiteSpace(x.LastError) ? "Step failed without error message." : x.LastError!))
+            .ToList();
+
+        var waiting = runDetail.Steps
+            .Where(x => x.Status.Equals("Waiting", StringComparison.OrdinalIgnoreCase))
+            .Select(x => x.StepId)
+            .ToList();
+
+        var blocked = runDetail.Steps
+            .Where(x => x.BlockedBy.Count > 0)
+            .Select(x => new DiagnosticBlockedStep(x.StepId, x.BlockedBy))
+            .ToList();
+
+        return new RunDiagnostics(runDetail.Steps.Count, failed, waiting, blocked);
+    }
 
     private void CleanupRunCaches()
     {
@@ -457,6 +993,8 @@
         ExpandedRunIds.RemoveWhere(instanceId => !validInstanceIds.Contains(instanceId));
         LoadingRunDetailInstanceIds.RemoveWhere(instanceId => !validInstanceIds.Contains(instanceId));
         CancelingRunInstanceIds.RemoveWhere(instanceId => !validInstanceIds.Contains(instanceId));
+        RerunningInstanceIds.RemoveWhere(instanceId => !validInstanceIds.Contains(instanceId));
+        CloningInstanceIds.RemoveWhere(instanceId => !validInstanceIds.Contains(instanceId));
 
         RemoveMissingKeys(RunDetailsByInstanceId, validInstanceIds);
         RemoveMissingKeys(RunDetailErrors, validInstanceIds);
@@ -469,8 +1007,16 @@
         {
             ExpandedStepKeys.Remove(stepKey);
             LoadingStepLogKeys.Remove(stepKey);
+            RetryingStepKeys.Remove(stepKey);
             StepLogsByStepKey.Remove(stepKey);
             StepLogErrorsByStepKey.Remove(stepKey);
+            StepLogSearchByStepKey.Remove(stepKey);
+            StepLogAttemptFilterByStepKey.Remove(stepKey);
+        }
+
+        if (ActiveCloneInstanceId.HasValue && !validInstanceIds.Contains(ActiveCloneInstanceId.Value))
+        {
+            ActiveCloneInstanceId = null;
         }
     }
 
@@ -510,6 +1056,17 @@
         };
     }
 
+    private static bool IsRetryableStepStatus(string status)
+    {
+        return status.ToLowerInvariant() switch
+        {
+            "failed" => true,
+            "canceled" => true,
+            "aborted" => true,
+            _ => false
+        };
+    }
+
     private static string BuildStepKey(Guid instanceId, string stepId)
     {
         return $"{instanceId:D}::{stepId}";
@@ -529,4 +1086,18 @@
             _ => "pending"
         };
     }
+
+    private sealed record TimelineEvent(DateTimeOffset At, string Text);
+
+    private sealed record DagStage(int Stage, IReadOnlyList<WorkflowInstanceStep> Steps);
+
+    private sealed record DiagnosticFailure(string StepId, string Reason);
+
+    private sealed record DiagnosticBlockedStep(string StepId, IReadOnlyList<string> DependsOn);
+
+    private sealed record RunDiagnostics(
+        int TotalSteps,
+        IReadOnlyList<DiagnosticFailure> FailedSteps,
+        IReadOnlyList<string> WaitingSteps,
+        IReadOnlyList<DiagnosticBlockedStep> BlockedSteps);
 }

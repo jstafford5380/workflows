@@ -102,6 +102,44 @@ public static class WorkflowDefinitionValidator
             }
         }
 
+        var policy = definition.Policy ?? WorkflowPolicyDefinition.Empty;
+        var seenRiskLabels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var riskLabel in policy.RiskLabels)
+        {
+            if (string.IsNullOrWhiteSpace(riskLabel))
+            {
+                errors.Add("Policy risk labels cannot contain empty values.");
+                continue;
+            }
+
+            if (!seenRiskLabels.Add(riskLabel.Trim()))
+            {
+                errors.Add($"Policy has duplicate risk label '{riskLabel}'.");
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(policy.EnvironmentInputKey))
+        {
+            errors.Add("Policy EnvironmentInputKey is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(policy.TicketInputKey))
+        {
+            errors.Add("Policy TicketInputKey is required.");
+        }
+
+        if (policy.ProductionValues.Count == 0 || policy.ProductionValues.All(string.IsNullOrWhiteSpace))
+        {
+            errors.Add("Policy ProductionValues must include at least one non-empty value.");
+        }
+
+        if (policy.TicketRequired
+            && !definition.InputSchema.Fields.Any(f => f.Name.Equals(policy.TicketInputKey, StringComparison.OrdinalIgnoreCase)))
+        {
+            errors.Add(
+                $"Policy requires ticket input '{policy.TicketInputKey}', but this key is not declared in InputSchema.");
+        }
+
         var seenStepIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var step in definition.Steps)
         {
@@ -206,6 +244,17 @@ public static class WorkflowDefinitionValidator
                 {
                     errors.Add($"Step '{step.StepId}' input '{inputName}' binding is invalid: {bindingError}");
                 }
+            }
+        }
+
+        if (policy.RequiresApprovalForProd)
+        {
+            var hasApprovalStep = definition.Steps.Any(
+                step => step.WaitForEvent is not null
+                        && step.WaitForEvent.EventType.Equals("approval", StringComparison.OrdinalIgnoreCase));
+            if (!hasApprovalStep)
+            {
+                errors.Add("Policy requires approval for production runs, but no approval wait step is configured.");
             }
         }
 

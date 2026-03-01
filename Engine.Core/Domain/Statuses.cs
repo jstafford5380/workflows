@@ -34,6 +34,15 @@ public enum OutboxMessageType
     PublishNotification = 1
 }
 
+public enum ApprovalRequestStatus
+{
+    Waiting = 0,
+    Approved = 1,
+    Rejected = 2,
+    Expired = 3,
+    Canceled = 4
+}
+
 public enum WorkItemKind
 {
     ExecuteStep = 0

@@ -120,7 +120,8 @@ public sealed class WorkflowRepository : IWorkflowRepository
             entity.RegisteredAt,
             definition.Description,
             definition.Details,
-            definition.InputSchema);
+            definition.InputSchema,
+            definition.Policy);
     }
 
     public async Task<IReadOnlyList<WorkflowDraftSummary>> ListDraftsAsync(CancellationToken cancellationToken)

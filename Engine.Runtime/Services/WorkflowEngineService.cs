@@ -80,7 +80,23 @@ public sealed class WorkflowEngineService : IWorkflowEngineService
         var draft = await _workflowRepository.GetDraftAsync(draftId, cancellationToken)
             ?? throw new InvalidOperationException($"Workflow draft '{draftId}' was not found.");
 
-        return await RegisterWorkflowDefinitionAsync(draft.Definition, cancellationToken);
+        var metadata = await RegisterWorkflowDefinitionAsync(draft.Definition, cancellationToken);
+        await AppendAuditEventAsync(
+            "workflow",
+            "published",
+            null,
+            metadata.Name,
+            null,
+            "system",
+            new JsonObject
+            {
+                ["name"] = metadata.Name,
+                ["version"] = metadata.Version,
+                ["revision"] = metadata.Revision,
+                ["draftId"] = draftId.ToString("D")
+            },
+            cancellationToken);
+        return metadata;
     }
 
     public async Task<WorkflowInstanceChecklistView> StartWorkflowAsync(
@@ -110,6 +126,13 @@ public sealed class WorkflowEngineService : IWorkflowEngineService
         {
             throw new InvalidOperationException(
                 $"Workflow inputs failed schema validation: {string.Join("; ", inputValidation.Errors)}");
+        }
+
+        var policyValidation = WorkflowPolicyRuntimeValidator.ValidateForStart(definition, normalizedInputs);
+        if (!policyValidation.IsValid)
+        {
+            throw new InvalidOperationException(
+                $"Workflow policy validation failed: {string.Join("; ", policyValidation.Errors)}");
         }
 
         var now = _clock.UtcNow;
@@ -170,6 +193,19 @@ public sealed class WorkflowEngineService : IWorkflowEngineService
             now);
 
         await _instanceRepository.CreateInstanceAsync(instance, steps, dependencies, outbox, cancellationToken);
+        await AppendAuditEventAsync(
+            "run",
+            "started",
+            instanceId,
+            definition.Name,
+            null,
+            "system",
+            new JsonObject
+            {
+                ["workflowName"] = definition.Name,
+                ["workflowVersion"] = definition.Version
+            },
+            cancellationToken);
 
         return (await GetInstanceChecklistAsync(instanceId, cancellationToken))
             ?? throw new InvalidOperationException("Failed to load newly created workflow instance.");
@@ -193,6 +229,12 @@ public sealed class WorkflowEngineService : IWorkflowEngineService
                 g => g.Key,
                 g => g.Where(d => !IsSatisfied(statusByStep, d.DependsOnStepId)).Select(d => d.DependsOnStepId).ToList(),
                 StringComparer.OrdinalIgnoreCase);
+        var dependsOnMap = dependencies
+            .GroupBy(x => x.StepId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                g => g.Key,
+                g => g.Select(d => d.DependsOnStepId).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                StringComparer.OrdinalIgnoreCase);
 
         var checklistSteps = steps
             .OrderBy(x => x.StepOrder)
@@ -203,6 +245,7 @@ public sealed class WorkflowEngineService : IWorkflowEngineService
                 step.Attempt,
                 step.StartedAt,
                 step.FinishedAt,
+                dependsOnMap.TryGetValue(step.StepId, out var dependsOn) ? dependsOn : [],
                 blockedByMap.TryGetValue(step.StepId, out var blockedBy) ? blockedBy : [],
                 step.LastError,
                 step.Outputs.Select(kvp => kvp.Key).ToList(),
@@ -236,7 +279,7 @@ public sealed class WorkflowEngineService : IWorkflowEngineService
 
     public Task<bool> CancelInstanceAsync(Guid instanceId, CancellationToken cancellationToken)
     {
-        return _instanceRepository.TryCancelInstanceAsync(instanceId, _clock.UtcNow, cancellationToken);
+        return CancelInstanceWithAuditAsync(instanceId, cancellationToken);
     }
 
     public async Task<IReadOnlyList<StepExecutionLogView>> GetStepExecutionLogsAsync(Guid instanceId, string stepId, CancellationToken cancellationToken)
@@ -254,8 +297,183 @@ public sealed class WorkflowEngineService : IWorkflowEngineService
 
     public Task<bool> RetryStepAsync(Guid instanceId, string stepId, CancellationToken cancellationToken)
     {
-        var outboxMessage = CreateEnqueueOutbox(instanceId, stepId, _clock.UtcNow);
-        return _instanceRepository.RetryStepAsync(instanceId, stepId, _clock.UtcNow, outboxMessage, cancellationToken);
+        return RetryStepWithAuditAsync(instanceId, stepId, cancellationToken);
+    }
+
+    public Task<IReadOnlyList<ApprovalRequestView>> ListApprovalsAsync(
+        ApprovalRequestStatus? status,
+        Guid? instanceId,
+        string? workflowName,
+        string? assignee,
+        string? stepId,
+        DateTimeOffset? createdAfter,
+        DateTimeOffset? createdBefore,
+        CancellationToken cancellationToken)
+    {
+        return _instanceRepository.ListApprovalRequestsAsync(
+            status,
+            instanceId,
+            workflowName,
+            assignee,
+            stepId,
+            createdAfter,
+            createdBefore,
+            _clock.UtcNow,
+            cancellationToken);
+    }
+
+    public Task<ApprovalRequestView?> GetApprovalAsync(Guid approvalId, CancellationToken cancellationToken)
+    {
+        return _instanceRepository.GetApprovalRequestAsync(approvalId, _clock.UtcNow, cancellationToken);
+    }
+
+    public async Task<ApprovalRequestView?> UpdateApprovalMetadataAsync(
+        Guid approvalId,
+        string? assignee,
+        string? reason,
+        DateTimeOffset? expiresAt,
+        string? actor,
+        string? comment,
+        CancellationToken cancellationToken)
+    {
+        var normalizedActor = NormalizeActor(actor);
+        var commentRecord = string.IsNullOrWhiteSpace(comment)
+            ? null
+            : new ApprovalCommentRecord(normalizedActor, comment.Trim(), _clock.UtcNow);
+
+        var updated = await _instanceRepository.UpdateApprovalMetadataAsync(
+            approvalId,
+            assignee,
+            reason,
+            expiresAt,
+            commentRecord,
+            _clock.UtcNow,
+            cancellationToken);
+
+        if (updated is null)
+        {
+            return null;
+        }
+
+        await AppendAuditEventAsync(
+            "approval",
+            "metadata.updated",
+            updated.InstanceId,
+            updated.WorkflowName,
+            updated.StepId,
+            normalizedActor,
+            new JsonObject
+            {
+                ["approvalId"] = updated.ApprovalId.ToString("D"),
+                ["assignee"] = updated.Assignee,
+                ["reason"] = updated.Reason,
+                ["expiresAt"] = updated.ExpiresAt
+            },
+            cancellationToken);
+        return updated;
+    }
+
+    public async Task<ApprovalRequestView?> AddApprovalCommentAsync(
+        Guid approvalId,
+        string actor,
+        string comment,
+        CancellationToken cancellationToken)
+    {
+        var normalizedActor = NormalizeActor(actor);
+        var updated = await _instanceRepository.AddApprovalCommentAsync(
+            approvalId,
+            new ApprovalCommentRecord(normalizedActor, comment.Trim(), _clock.UtcNow),
+            _clock.UtcNow,
+            cancellationToken);
+
+        if (updated is null)
+        {
+            return null;
+        }
+
+        await AppendAuditEventAsync(
+            "approval",
+            "comment.added",
+            updated.InstanceId,
+            updated.WorkflowName,
+            updated.StepId,
+            normalizedActor,
+            new JsonObject
+            {
+                ["approvalId"] = updated.ApprovalId.ToString("D"),
+                ["comment"] = comment.Trim()
+            },
+            cancellationToken);
+        return updated;
+    }
+
+    public async Task<ApprovalRequestView?> ResolveApprovalAsync(
+        Guid approvalId,
+        bool approved,
+        string? actor,
+        string? comment,
+        CancellationToken cancellationToken)
+    {
+        var normalizedActor = NormalizeActor(actor);
+        var commentRecord = string.IsNullOrWhiteSpace(comment)
+            ? null
+            : new ApprovalCommentRecord(normalizedActor, comment.Trim(), _clock.UtcNow);
+
+        var resolution = await _instanceRepository.ResolveApprovalAsync(
+            approvalId,
+            approved,
+            commentRecord,
+            _clock.UtcNow,
+            cancellationToken);
+
+        if (resolution.Approval is null)
+        {
+            return null;
+        }
+
+        if (resolution.Applied && resolution.ResolutionEvent is not null)
+        {
+            await _instanceRepository.IngestExternalEventAsync(resolution.ResolutionEvent, _clock.UtcNow, cancellationToken);
+        }
+
+        await AppendAuditEventAsync(
+            "approval",
+            approved ? "approved" : "rejected",
+            resolution.Approval.InstanceId,
+            resolution.Approval.WorkflowName,
+            resolution.Approval.StepId,
+            normalizedActor,
+            new JsonObject
+            {
+                ["approvalId"] = resolution.Approval.ApprovalId.ToString("D"),
+                ["comment"] = commentRecord?.Comment
+            },
+            cancellationToken);
+
+        return await _instanceRepository.GetApprovalRequestAsync(approvalId, _clock.UtcNow, cancellationToken);
+    }
+
+    public Task<IReadOnlyList<AuditEventView>> ListAuditEventsAsync(
+        int take,
+        Guid? instanceId,
+        string? workflowName,
+        string? category,
+        string? action,
+        string? actor,
+        DateTimeOffset? createdAfter,
+        DateTimeOffset? createdBefore,
+        CancellationToken cancellationToken)
+    {
+        return _instanceRepository.ListAuditEventsAsync(
+            take,
+            instanceId,
+            workflowName,
+            category,
+            action,
+            actor,
+            createdAfter,
+            createdBefore,
+            cancellationToken);
     }
 
     internal static OutboxMessageRecord CreateEnqueueOutbox(Guid instanceId, string stepId, DateTimeOffset availableAt)
@@ -267,6 +485,78 @@ public sealed class WorkflowEngineService : IWorkflowEngineService
             payload,
             DateTimeOffset.UtcNow,
             null);
+    }
+
+    private async Task<bool> CancelInstanceWithAuditAsync(Guid instanceId, CancellationToken cancellationToken)
+    {
+        var canceled = await _instanceRepository.TryCancelInstanceAsync(instanceId, _clock.UtcNow, cancellationToken);
+        if (canceled)
+        {
+            await AppendAuditEventAsync(
+                "run",
+                "canceled",
+                instanceId,
+                null,
+                null,
+                "system",
+                new JsonObject(),
+                cancellationToken);
+        }
+
+        return canceled;
+    }
+
+    private async Task<bool> RetryStepWithAuditAsync(Guid instanceId, string stepId, CancellationToken cancellationToken)
+    {
+        var outboxMessage = CreateEnqueueOutbox(instanceId, stepId, _clock.UtcNow);
+        var queued = await _instanceRepository.RetryStepAsync(instanceId, stepId, _clock.UtcNow, outboxMessage, cancellationToken);
+        if (queued)
+        {
+            await AppendAuditEventAsync(
+                "run",
+                "step.retry.requested",
+                instanceId,
+                null,
+                stepId,
+                "system",
+                new JsonObject
+                {
+                    ["stepId"] = stepId
+                },
+                cancellationToken);
+        }
+
+        return queued;
+    }
+
+    private Task AppendAuditEventAsync(
+        string category,
+        string action,
+        Guid? instanceId,
+        string? workflowName,
+        string? stepId,
+        string actor,
+        JsonObject details,
+        CancellationToken cancellationToken)
+    {
+        return _instanceRepository.AppendAuditEventAsync(
+            new AuditEventView(
+                Guid.NewGuid(),
+                category,
+                action,
+                instanceId,
+                workflowName,
+                stepId,
+                actor,
+                details,
+                _clock.UtcNow),
+            cancellationToken);
+    }
+
+    private static string NormalizeActor(string? actor)
+    {
+        var trimmed = actor?.Trim();
+        return string.IsNullOrWhiteSpace(trimmed) ? "system" : trimmed;
     }
 
     private static bool IsSatisfied(IReadOnlyDictionary<string, StepRunStatus> statusByStep, string dependsOnStepId)

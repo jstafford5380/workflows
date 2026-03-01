@@ -234,6 +234,23 @@ public sealed class InstanceRepository : IInstanceRepository
             CreatedAt = now
         });
 
+        if (subscription.EventType.Equals("approval", StringComparison.OrdinalIgnoreCase))
+        {
+            _dbContext.ApprovalRequests.Add(new ApprovalRequestEntity
+            {
+                ApprovalId = Guid.NewGuid(),
+                SubscriptionId = subscription.SubscriptionId,
+                InstanceId = subscription.InstanceId,
+                StepId = subscription.StepId,
+                EventType = subscription.EventType,
+                CorrelationKey = subscription.CorrelationKey,
+                Status = ApprovalRequestStatus.Waiting.ToString(),
+                CreatedAt = now,
+                UpdatedAt = now,
+                CommentsJson = "[]"
+            });
+        }
+
         await _dbContext.SaveChangesAsync(cancellationToken);
         await tx.CommitAsync(cancellationToken);
     }
@@ -568,6 +585,265 @@ public sealed class InstanceRepository : IInstanceRepository
         return new EventIngestResult(false, fulfilledCount);
     }
 
+    public async Task<IReadOnlyList<ApprovalRequestView>> ListApprovalRequestsAsync(
+        ApprovalRequestStatus? status,
+        Guid? instanceId,
+        string? workflowName,
+        string? assignee,
+        string? stepId,
+        DateTimeOffset? createdAfter,
+        DateTimeOffset? createdBefore,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var query = _dbContext.ApprovalRequests.AsQueryable();
+        if (status.HasValue)
+        {
+            query = query.Where(x => x.Status == status.Value.ToString());
+        }
+        if (instanceId.HasValue)
+        {
+            query = query.Where(x => x.InstanceId == instanceId.Value);
+        }
+        if (!string.IsNullOrWhiteSpace(assignee))
+        {
+            var normalizedAssignee = assignee.Trim();
+            query = query.Where(x => x.Assignee != null && x.Assignee == normalizedAssignee);
+        }
+        if (!string.IsNullOrWhiteSpace(stepId))
+        {
+            var normalizedStepId = stepId.Trim();
+            query = query.Where(x => x.StepId == normalizedStepId);
+        }
+        if (createdAfter.HasValue)
+        {
+            query = query.Where(x => x.CreatedAt >= createdAfter.Value);
+        }
+        if (createdBefore.HasValue)
+        {
+            query = query.Where(x => x.CreatedAt <= createdBefore.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(workflowName))
+        {
+            var normalizedWorkflowName = workflowName.Trim();
+            query = query.Where(x => _dbContext.WorkflowInstances
+                .Any(i => i.InstanceId == x.InstanceId && i.WorkflowName == normalizedWorkflowName));
+        }
+
+        var rows = await query.AsNoTracking()
+            .OrderByDescending(x => x.CreatedAt)
+            .Take(300)
+            .ToListAsync(cancellationToken);
+
+        var instanceLookup = await _dbContext.WorkflowInstances
+            .AsNoTracking()
+            .Where(x => rows.Select(r => r.InstanceId).Contains(x.InstanceId))
+            .ToDictionaryAsync(x => x.InstanceId, cancellationToken);
+
+        return rows.Select(x => ToApprovalView(x, instanceLookup.GetValueOrDefault(x.InstanceId), now)).ToList();
+    }
+
+    public async Task<ApprovalRequestView?> GetApprovalRequestAsync(Guid approvalId, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var row = await _dbContext.ApprovalRequests
+            .AsNoTracking()
+            .SingleOrDefaultAsync(x => x.ApprovalId == approvalId, cancellationToken);
+
+        if (row is null)
+        {
+            return null;
+        }
+
+        var instance = await _dbContext.WorkflowInstances
+            .AsNoTracking()
+            .SingleOrDefaultAsync(x => x.InstanceId == row.InstanceId, cancellationToken);
+        return ToApprovalView(row, instance, now);
+    }
+
+    public async Task<ApprovalRequestView?> UpdateApprovalMetadataAsync(
+        Guid approvalId,
+        string? assignee,
+        string? reason,
+        DateTimeOffset? expiresAt,
+        ApprovalCommentRecord? comment,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var row = await _dbContext.ApprovalRequests
+            .SingleOrDefaultAsync(x => x.ApprovalId == approvalId, cancellationToken);
+
+        if (row is null)
+        {
+            return null;
+        }
+
+        row.Assignee = NormalizeNullable(assignee);
+        row.Reason = NormalizeNullable(reason);
+        row.ExpiresAt = expiresAt;
+        row.UpdatedAt = now;
+        if (comment is not null)
+        {
+            row.CommentsJson = AppendApprovalComment(row.CommentsJson, comment);
+        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        var instance = await _dbContext.WorkflowInstances
+            .AsNoTracking()
+            .SingleOrDefaultAsync(x => x.InstanceId == row.InstanceId, cancellationToken);
+        return ToApprovalView(row, instance, now);
+    }
+
+    public async Task<ApprovalRequestView?> AddApprovalCommentAsync(
+        Guid approvalId,
+        ApprovalCommentRecord comment,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var row = await _dbContext.ApprovalRequests
+            .SingleOrDefaultAsync(x => x.ApprovalId == approvalId, cancellationToken);
+
+        if (row is null)
+        {
+            return null;
+        }
+
+        row.CommentsJson = AppendApprovalComment(row.CommentsJson, comment);
+        row.UpdatedAt = now;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        var instance = await _dbContext.WorkflowInstances
+            .AsNoTracking()
+            .SingleOrDefaultAsync(x => x.InstanceId == row.InstanceId, cancellationToken);
+        return ToApprovalView(row, instance, now);
+    }
+
+    public async Task<ApprovalDecisionResult> ResolveApprovalAsync(
+        Guid approvalId,
+        bool approved,
+        ApprovalCommentRecord? comment,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var row = await _dbContext.ApprovalRequests
+            .SingleOrDefaultAsync(x => x.ApprovalId == approvalId, cancellationToken);
+
+        if (row is null)
+        {
+            return new ApprovalDecisionResult(false, null, null);
+        }
+
+        if (!row.Status.Equals(ApprovalRequestStatus.Waiting.ToString(), StringComparison.OrdinalIgnoreCase))
+        {
+            var existingInstance = await _dbContext.WorkflowInstances
+                .AsNoTracking()
+                .SingleOrDefaultAsync(x => x.InstanceId == row.InstanceId, cancellationToken);
+            return new ApprovalDecisionResult(false, ToApprovalView(row, existingInstance, now), null);
+        }
+
+        if (comment is not null)
+        {
+            row.CommentsJson = AppendApprovalComment(row.CommentsJson, comment);
+        }
+
+        row.Status = approved ? ApprovalRequestStatus.Approved.ToString() : ApprovalRequestStatus.Rejected.ToString();
+        row.ResolvedAt = now;
+        row.UpdatedAt = now;
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        var payload = new JsonObject
+        {
+            ["approved"] = approved,
+            ["approvalId"] = row.ApprovalId.ToString("D"),
+            ["assignee"] = row.Assignee,
+            ["reason"] = row.Reason,
+            ["decisionComment"] = comment?.Comment
+        };
+
+        var envelope = new ExternalEventEnvelope(
+            $"approval:{row.ApprovalId:D}:{(approved ? "approve" : "reject")}:{now.ToUnixTimeMilliseconds()}",
+            row.EventType,
+            row.CorrelationKey,
+            payload);
+
+        var instance = await _dbContext.WorkflowInstances
+            .AsNoTracking()
+            .SingleOrDefaultAsync(x => x.InstanceId == row.InstanceId, cancellationToken);
+        return new ApprovalDecisionResult(true, ToApprovalView(row, instance, now), envelope);
+    }
+
+    public async Task<IReadOnlyList<AuditEventView>> ListAuditEventsAsync(
+        int take,
+        Guid? instanceId,
+        string? workflowName,
+        string? category,
+        string? action,
+        string? actor,
+        DateTimeOffset? createdAfter,
+        DateTimeOffset? createdBefore,
+        CancellationToken cancellationToken)
+    {
+        var query = _dbContext.AuditEvents.AsQueryable();
+        if (instanceId.HasValue)
+        {
+            query = query.Where(x => x.InstanceId == instanceId.Value);
+        }
+        if (!string.IsNullOrWhiteSpace(workflowName))
+        {
+            var normalizedWorkflowName = workflowName.Trim();
+            query = query.Where(x => x.WorkflowName != null && x.WorkflowName == normalizedWorkflowName);
+        }
+        if (!string.IsNullOrWhiteSpace(category))
+        {
+            var normalizedCategory = category.Trim();
+            query = query.Where(x => x.Category == normalizedCategory);
+        }
+        if (!string.IsNullOrWhiteSpace(action))
+        {
+            var normalizedAction = action.Trim();
+            query = query.Where(x => x.Action == normalizedAction);
+        }
+        if (!string.IsNullOrWhiteSpace(actor))
+        {
+            var normalizedActor = actor.Trim();
+            query = query.Where(x => x.Actor == normalizedActor);
+        }
+        if (createdAfter.HasValue)
+        {
+            query = query.Where(x => x.CreatedAt >= createdAfter.Value);
+        }
+        if (createdBefore.HasValue)
+        {
+            query = query.Where(x => x.CreatedAt <= createdBefore.Value);
+        }
+
+        var rows = await query.AsNoTracking()
+            .OrderByDescending(x => x.CreatedAt)
+            .Take(Math.Max(1, take))
+            .ToListAsync(cancellationToken);
+
+        return rows.Select(ToAuditView).ToList();
+    }
+
+    public async Task AppendAuditEventAsync(AuditEventView auditEvent, CancellationToken cancellationToken)
+    {
+        _dbContext.AuditEvents.Add(new AuditEventEntity
+        {
+            AuditId = auditEvent.AuditId,
+            Category = auditEvent.Category,
+            Action = auditEvent.Action,
+            InstanceId = auditEvent.InstanceId,
+            WorkflowName = auditEvent.WorkflowName,
+            StepId = auditEvent.StepId,
+            Actor = auditEvent.Actor,
+            DetailsJson = PersistenceJson.SerializeObject(auditEvent.Details),
+            CreatedAt = auditEvent.CreatedAt
+        });
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task MarkInstanceSucceededIfCompleteAsync(Guid instanceId, DateTimeOffset now, CancellationToken cancellationToken)
     {
         await MarkInstanceSucceededIfCompleteInternalAsync(instanceId, now, cancellationToken);
@@ -743,6 +1019,80 @@ public sealed class InstanceRepository : IInstanceRepository
             CreatedAt = outbox.CreatedAt,
             ProcessedAt = outbox.ProcessedAt
         };
+    }
+
+    private static ApprovalRequestView ToApprovalView(
+        ApprovalRequestEntity row,
+        WorkflowInstanceEntity? instance,
+        DateTimeOffset now)
+    {
+        var status = Enum.Parse<ApprovalRequestStatus>(row.Status, true);
+        if (status == ApprovalRequestStatus.Waiting && row.ExpiresAt.HasValue && row.ExpiresAt.Value <= now)
+        {
+            status = ApprovalRequestStatus.Expired;
+        }
+
+        var comments = DeserializeApprovalComments(row.CommentsJson);
+        return new ApprovalRequestView(
+            row.ApprovalId,
+            row.InstanceId,
+            instance?.WorkflowName ?? "(unknown)",
+            instance?.WorkflowVersion ?? 0,
+            row.StepId,
+            row.EventType,
+            row.CorrelationKey,
+            status,
+            row.Assignee,
+            row.Reason,
+            row.ExpiresAt,
+            row.CreatedAt,
+            row.UpdatedAt,
+            row.ResolvedAt,
+            comments);
+    }
+
+    private static string AppendApprovalComment(string commentsJson, ApprovalCommentRecord comment)
+    {
+        var comments = DeserializeApprovalComments(commentsJson).ToList();
+        comments.Add(comment);
+        return PersistenceJson.Serialize(comments);
+    }
+
+    private static IReadOnlyList<ApprovalCommentRecord> DeserializeApprovalComments(string? commentsJson)
+    {
+        if (string.IsNullOrWhiteSpace(commentsJson))
+        {
+            return [];
+        }
+
+        try
+        {
+            return PersistenceJson.Deserialize<List<ApprovalCommentRecord>>(commentsJson);
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static AuditEventView ToAuditView(AuditEventEntity row)
+    {
+        return new AuditEventView(
+            row.AuditId,
+            row.Category,
+            row.Action,
+            row.InstanceId,
+            row.WorkflowName,
+            row.StepId,
+            row.Actor,
+            PersistenceJson.DeserializeObject(row.DetailsJson),
+            row.CreatedAt);
+    }
+
+    private static string? NormalizeNullable(string? value)
+    {
+        var trimmed = value?.Trim();
+        return string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
     }
 
     private static string ComputePayloadHash(JsonObject payload)

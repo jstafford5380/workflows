@@ -2,6 +2,7 @@
 @using System.Globalization
 @using System.Text.Json
 @using System.Text.Json.Nodes
+@using Microsoft.AspNetCore.Components.Forms
 @using Engine.BundleUi.Models
 @using Engine.BundleUi.Services
 @inject BundleApiClient BundleApiClient
@@ -106,6 +107,53 @@
 
             <div class="field-row">
                 <div class="field-row-header">
+                    <label>Policy Guardrails</label>
+                </div>
+                <div class="policy-card">
+                    <p class="field-hint">
+                        Policy guardrails are enforced at run start. They do not execute steps; they validate inputs and required controls.
+                    </p>
+                    <div class="policy-rules">
+                        <div><strong>Requires Approval For Prod</strong>: blocks production runs unless the recipe includes an <code>approval</code> wait step.</div>
+                        <div><strong>Ticket Required</strong>: blocks run start unless the configured ticket input contains a non-empty value.</div>
+                    </div>
+                    <div class="policy-toggle-grid">
+                        <label class="checkbox-label policy-toggle">
+                            <input type="checkbox" @bind="DraftRequiresApprovalForProd" disabled="@IsBusy" />
+                            <span>Requires Approval For Prod</span>
+                        </label>
+                        <label class="checkbox-label policy-toggle">
+                            <input type="checkbox" @bind="DraftTicketRequired" disabled="@IsBusy" />
+                            <span>Ticket Required</span>
+                        </label>
+                    </div>
+                    <div class="policy-grid">
+                        <div class="field-row">
+                            <label>Risk Labels (comma or newline separated)</label>
+                            <textarea class="json-input short" @bind="DraftRiskLabelsText" disabled="@IsBusy"></textarea>
+                            <p class="field-hint">Tags for visibility and filtering (for example: <code>iam</code>, <code>network</code>, <code>prod-impact</code>).</p>
+                        </div>
+                        <div class="field-row">
+                            <label>Environment Input Key</label>
+                            <input type="text" @bind="DraftEnvironmentInputKey" disabled="@IsBusy" />
+                            <p class="field-hint">Input field name used to detect run environment (for example: <code>environment</code>).</p>
+                        </div>
+                        <div class="field-row">
+                            <label>Production Values (comma or newline separated)</label>
+                            <textarea class="json-input short" @bind="DraftProductionValuesText" disabled="@IsBusy"></textarea>
+                            <p class="field-hint">Values that count as production for the environment key (for example: <code>prod</code>, <code>production</code>).</p>
+                        </div>
+                        <div class="field-row">
+                            <label>Ticket Input Key</label>
+                            <input type="text" @bind="DraftTicketInputKey" disabled="@IsBusy" />
+                            <p class="field-hint">Input field name used as the ticket reference when <em>Ticket Required</em> is enabled.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="field-row">
+                <div class="field-row-header">
                     <label>Input Fields</label>
                     <button type="button" class="btn-secondary" @onclick="AddInputField" disabled="@IsBusy">Add Field</button>
                 </div>
@@ -183,6 +231,42 @@
                         }
                     }
                 </div>
+            </div>
+
+            <div class="field-row">
+                <div class="field-row-header">
+                    <label>Draft Scripts</label>
+                </div>
+                @if (!SelectedDraftId.HasValue)
+                {
+                    <p class="field-hint">Save the draft first to upload scripts.</p>
+                }
+                else
+                {
+                    <div class="script-upload-row">
+                        <InputFile OnChange="OnScriptFileSelected" disabled="@IsBusy" />
+                        <input type="text" placeholder="Optional path (default scripts/&lt;filename&gt;)" @bind="ScriptUploadPath" disabled="@IsBusy" />
+                        <button type="button" class="btn-secondary" @onclick="UploadSelectedScriptAsync" disabled="@IsBusy">Upload Script</button>
+                    </div>
+                    <p class="field-hint">Use uploaded path values in step <code>activityRef</code> (example: <code>scripts/create-project.sh</code>).</p>
+
+                    @if (DraftScripts.Count == 0)
+                    {
+                        <p class="empty-note">No scripts uploaded yet.</p>
+                    }
+                    else
+                    {
+                        <div class="script-list">
+                            @foreach (var script in DraftScripts)
+                            {
+                                <div class="script-row">
+                                    <code>@script.Path</code>
+                                    <button type="button" class="btn-danger btn-small" @onclick="() => DeleteScriptAsync(script.Path)" disabled="@IsBusy">Remove</button>
+                                </div>
+                            }
+                        </div>
+                    }
+                }
             </div>
 
             <div class="field-row">
@@ -569,7 +653,25 @@
 
     private string DraftDetails { get; set; } = string.Empty;
 
+    private string DraftRiskLabelsText { get; set; } = string.Empty;
+
+    private bool DraftRequiresApprovalForProd { get; set; }
+
+    private bool DraftTicketRequired { get; set; }
+
+    private string DraftEnvironmentInputKey { get; set; } = "environment";
+
+    private string DraftProductionValuesText { get; set; } = "prod\nproduction";
+
+    private string DraftTicketInputKey { get; set; } = "ticketId";
+
     private List<DraftInputFieldEditor> InputFields { get; set; } = [];
+
+    private IReadOnlyList<DraftScript> DraftScripts { get; set; } = [];
+
+    private IBrowserFile? SelectedScriptFile { get; set; }
+
+    private string ScriptUploadPath { get; set; } = string.Empty;
 
     private List<DraftStepEditor> StepEditors { get; set; } = [];
 
@@ -625,7 +727,16 @@
         DraftVersion = 1;
         DraftDescription = string.Empty;
         DraftDetails = string.Empty;
+        DraftRiskLabelsText = string.Empty;
+        DraftRequiresApprovalForProd = false;
+        DraftTicketRequired = false;
+        DraftEnvironmentInputKey = "environment";
+        DraftProductionValuesText = "prod\nproduction";
+        DraftTicketInputKey = "ticketId";
         InputFields = [];
+        DraftScripts = [];
+        SelectedScriptFile = null;
+        ScriptUploadPath = string.Empty;
         StepEditors = [];
         ShowAdvancedStepJson = false;
         AdvancedStepsJson = "[]";
@@ -652,7 +763,9 @@
             DraftVersion = draft.Definition.Version;
             DraftDescription = draft.Definition.Description ?? string.Empty;
             DraftDetails = draft.Definition.Details ?? string.Empty;
+            LoadPolicy(draft.Definition.Policy);
             LoadInputFields(draft.Definition.InputSchema);
+            await LoadDraftScriptsAsync(draft.DraftId, cancellationSource.Token);
             LoadSteps(draft.Definition.Steps);
             AdvancedStepsJson = JsonSerializer.Serialize(draft.Definition.Steps, JsonOptions);
             EditorSuccessMessage = "Draft loaded.";
@@ -687,6 +800,10 @@
                 SelectedDraftId = summary.DraftId;
             }
 
+            if (SelectedDraftId.HasValue)
+            {
+                await LoadDraftScriptsAsync(SelectedDraftId.Value, cancellationSource.Token);
+            }
             await RefreshDraftsAsync();
             EditorSuccessMessage = $"Draft saved ({summary.Name} v{summary.Version}).";
         }
@@ -766,7 +883,122 @@
             string.IsNullOrWhiteSpace(DraftDescription) ? null : DraftDescription.Trim(),
             string.IsNullOrWhiteSpace(DraftDetails) ? null : DraftDetails.Trim(),
             inputSchema,
+            BuildPolicy(),
             steps);
+    }
+
+    private void LoadPolicy(WorkflowPolicy? policy)
+    {
+        var effective = policy ?? WorkflowPolicy.Empty;
+        DraftRiskLabelsText = string.Join(Environment.NewLine, effective.RiskLabels);
+        DraftRequiresApprovalForProd = effective.RequiresApprovalForProd;
+        DraftTicketRequired = effective.TicketRequired;
+        DraftEnvironmentInputKey = string.IsNullOrWhiteSpace(effective.EnvironmentInputKey)
+            ? "environment"
+            : effective.EnvironmentInputKey;
+        DraftProductionValuesText = effective.ProductionValues.Count == 0
+            ? "prod\nproduction"
+            : string.Join(Environment.NewLine, effective.ProductionValues);
+        DraftTicketInputKey = string.IsNullOrWhiteSpace(effective.TicketInputKey)
+            ? "ticketId"
+            : effective.TicketInputKey;
+    }
+
+    private WorkflowPolicy BuildPolicy()
+    {
+        var environmentInputKey = string.IsNullOrWhiteSpace(DraftEnvironmentInputKey)
+            ? "environment"
+            : DraftEnvironmentInputKey.Trim();
+        var ticketInputKey = string.IsNullOrWhiteSpace(DraftTicketInputKey)
+            ? "ticketId"
+            : DraftTicketInputKey.Trim();
+        var productionValues = ParseKeyList(DraftProductionValuesText);
+        var riskLabels = ParseKeyList(DraftRiskLabelsText);
+
+        return new WorkflowPolicy(
+            riskLabels,
+            DraftRequiresApprovalForProd,
+            DraftTicketRequired,
+            environmentInputKey,
+            productionValues.Count == 0 ? ["prod", "production"] : productionValues,
+            ticketInputKey);
+    }
+
+    private async Task LoadDraftScriptsAsync(Guid draftId, CancellationToken cancellationToken)
+    {
+        DraftScripts = await BundleApiClient.GetWorkflowDraftScriptsAsync(draftId, cancellationToken);
+    }
+
+    private void OnScriptFileSelected(InputFileChangeEventArgs e)
+    {
+        SelectedScriptFile = e.File;
+    }
+
+    private async Task UploadSelectedScriptAsync()
+    {
+        if (!SelectedDraftId.HasValue)
+        {
+            EditorErrorMessage = "Save the draft before uploading scripts.";
+            return;
+        }
+
+        if (SelectedScriptFile is null)
+        {
+            EditorErrorMessage = "Select a script file to upload.";
+            return;
+        }
+
+        IsBusy = true;
+        EditorErrorMessage = null;
+
+        using var cancellationSource = new CancellationTokenSource();
+        try
+        {
+            _ = await BundleApiClient.UploadWorkflowDraftScriptAsync(
+                SelectedDraftId.Value,
+                SelectedScriptFile,
+                ScriptUploadPath,
+                cancellationSource.Token);
+            await LoadDraftScriptsAsync(SelectedDraftId.Value, cancellationSource.Token);
+            SelectedScriptFile = null;
+            ScriptUploadPath = string.Empty;
+            EditorSuccessMessage = "Script uploaded.";
+        }
+        catch (Exception ex)
+        {
+            EditorErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task DeleteScriptAsync(string scriptPath)
+    {
+        if (!SelectedDraftId.HasValue)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        EditorErrorMessage = null;
+
+        using var cancellationSource = new CancellationTokenSource();
+        try
+        {
+            await BundleApiClient.DeleteWorkflowDraftScriptAsync(SelectedDraftId.Value, scriptPath, cancellationSource.Token);
+            await LoadDraftScriptsAsync(SelectedDraftId.Value, cancellationSource.Token);
+            EditorSuccessMessage = "Script removed.";
+        }
+        catch (Exception ex)
+        {
+            EditorErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
     }
 
     private void AddInputField()

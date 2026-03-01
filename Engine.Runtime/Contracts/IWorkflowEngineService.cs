@@ -39,4 +39,49 @@ public interface IWorkflowEngineService
     Task<bool> RetryStepAsync(Guid instanceId, string stepId, CancellationToken cancellationToken);
 
     Task<EventIngestResult> IngestEventAsync(ExternalEventEnvelope externalEvent, CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<ApprovalRequestView>> ListApprovalsAsync(
+        ApprovalRequestStatus? status,
+        Guid? instanceId,
+        string? workflowName,
+        string? assignee,
+        string? stepId,
+        DateTimeOffset? createdAfter,
+        DateTimeOffset? createdBefore,
+        CancellationToken cancellationToken);
+
+    Task<ApprovalRequestView?> GetApprovalAsync(Guid approvalId, CancellationToken cancellationToken);
+
+    Task<ApprovalRequestView?> UpdateApprovalMetadataAsync(
+        Guid approvalId,
+        string? assignee,
+        string? reason,
+        DateTimeOffset? expiresAt,
+        string? actor,
+        string? comment,
+        CancellationToken cancellationToken);
+
+    Task<ApprovalRequestView?> AddApprovalCommentAsync(
+        Guid approvalId,
+        string actor,
+        string comment,
+        CancellationToken cancellationToken);
+
+    Task<ApprovalRequestView?> ResolveApprovalAsync(
+        Guid approvalId,
+        bool approved,
+        string? actor,
+        string? comment,
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<AuditEventView>> ListAuditEventsAsync(
+        int take,
+        Guid? instanceId,
+        string? workflowName,
+        string? category,
+        string? action,
+        string? actor,
+        DateTimeOffset? createdAfter,
+        DateTimeOffset? createdBefore,
+        CancellationToken cancellationToken);
 }

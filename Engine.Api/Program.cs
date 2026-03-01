@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Engine.Activities;
 using Engine.Api.Bundles;
+using Engine.Api.Drafts;
 using Engine.Persistence;
 using Engine.Runtime;
 using FastEndpoints;
@@ -33,6 +34,8 @@ builder.Services.AddEngineActivities(builder.Configuration);
 builder.Services.AddEngineRuntime();
 builder.Services.Configure<BundleOptions>(builder.Configuration.GetSection("Bundles"));
 builder.Services.AddSingleton<IBundleService, BundleService>();
+builder.Services.AddSingleton<IDraftScriptStore, DraftScriptStore>();
+builder.Services.AddScoped<IDraftWorkflowPublisher, DraftWorkflowPublisher>();
 
 var app = builder.Build();
 

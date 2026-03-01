@@ -43,7 +43,8 @@ public sealed record WorkflowDefinitionMetadata(
     DateTimeOffset RegisteredAt,
     string? Description,
     string? Details,
-    WorkflowInputSchema InputSchema);
+    WorkflowInputSchema InputSchema,
+    WorkflowPolicy Policy);
 
 public sealed record WorkflowDraftSummary(
     Guid DraftId,
@@ -58,12 +59,15 @@ public sealed record WorkflowDraft(
     DateTimeOffset UpdatedAt,
     WorkflowDraftDefinition Definition);
 
+public sealed record DraftScript(string Path);
+
 public sealed record WorkflowDraftDefinition(
     string Name,
     int Version,
     string? Description,
     string? Details,
     WorkflowInputSchema InputSchema,
+    WorkflowPolicy Policy,
     IReadOnlyList<WorkflowStepDraftDefinition> Steps);
 
 public sealed record WorkflowStepDraftDefinition(
@@ -107,6 +111,17 @@ public sealed record WorkflowInputField(
     bool IsSecret,
     IReadOnlyList<string> Options);
 
+public sealed record WorkflowPolicy(
+    IReadOnlyList<string> RiskLabels,
+    bool RequiresApprovalForProd,
+    bool TicketRequired,
+    string EnvironmentInputKey,
+    IReadOnlyList<string> ProductionValues,
+    string TicketInputKey)
+{
+    public static WorkflowPolicy Empty { get; } = new([], false, false, "environment", ["prod", "production"], "ticketId");
+}
+
 public sealed record WorkflowInstanceStep(
     string StepId,
     string DisplayName,
@@ -114,9 +129,11 @@ public sealed record WorkflowInstanceStep(
     int Attempt,
     DateTimeOffset? StartedAt,
     DateTimeOffset? FinishedAt,
+    IReadOnlyList<string> DependsOn,
     IReadOnlyList<string> BlockedBy,
     string? LastError,
-    IReadOnlyList<string> OutputKeys);
+    IReadOnlyList<string> OutputKeys,
+    IReadOnlyDictionary<string, bool> SafetyMetadata);
 
 public sealed record WorkflowInstanceChecklist(
     Guid InstanceId,
@@ -125,6 +142,7 @@ public sealed record WorkflowInstanceChecklist(
     string Status,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
+    JsonObject Inputs,
     IReadOnlyList<WorkflowInstanceStep> Steps);
 
 public sealed record StepExecutionLog(
@@ -140,3 +158,55 @@ public sealed record WorkflowInstanceSummary(
     string Status,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
+
+public sealed record ApprovalComment(
+    string Author,
+    string Comment,
+    DateTimeOffset At);
+
+public sealed record ApprovalRequest(
+    Guid ApprovalId,
+    Guid InstanceId,
+    string WorkflowName,
+    int WorkflowVersion,
+    string StepId,
+    string EventType,
+    string CorrelationKey,
+    string Status,
+    string? Assignee,
+    string? Reason,
+    DateTimeOffset? ExpiresAt,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt,
+    DateTimeOffset? ResolvedAt,
+    IReadOnlyList<ApprovalComment> Comments);
+
+public sealed record ApprovalQuery(
+    string? Status,
+    Guid? InstanceId,
+    string? WorkflowName,
+    string? Assignee,
+    string? StepId,
+    DateTimeOffset? CreatedAfter,
+    DateTimeOffset? CreatedBefore);
+
+public sealed record AuditEvent(
+    Guid AuditId,
+    string Category,
+    string Action,
+    Guid? InstanceId,
+    string? WorkflowName,
+    string? StepId,
+    string Actor,
+    JsonObject Details,
+    DateTimeOffset CreatedAt);
+
+public sealed record AuditQuery(
+    int Take,
+    Guid? InstanceId,
+    string? WorkflowName,
+    string? Category,
+    string? Action,
+    string? Actor,
+    DateTimeOffset? CreatedAfter,
+    DateTimeOffset? CreatedBefore);

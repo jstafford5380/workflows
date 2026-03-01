@@ -14,7 +14,26 @@ public sealed record WorkflowDefinition
 
     public WorkflowInputSchemaDefinition InputSchema { get; init; } = WorkflowInputSchemaDefinition.Empty;
 
+    public WorkflowPolicyDefinition Policy { get; init; } = WorkflowPolicyDefinition.Empty;
+
     public required IReadOnlyList<WorkflowStepDefinition> Steps { get; init; }
+}
+
+public sealed record WorkflowPolicyDefinition
+{
+    public static WorkflowPolicyDefinition Empty { get; } = new();
+
+    public IReadOnlyList<string> RiskLabels { get; init; } = [];
+
+    public bool RequiresApprovalForProd { get; init; }
+
+    public bool TicketRequired { get; init; }
+
+    public string EnvironmentInputKey { get; init; } = "environment";
+
+    public IReadOnlyList<string> ProductionValues { get; init; } = ["prod", "production"];
+
+    public string TicketInputKey { get; init; } = "ticketId";
 }
 
 public sealed record WorkflowInputSchemaDefinition

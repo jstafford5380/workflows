@@ -1,0 +1,456 @@
+@page "/approvals"
+@using Engine.BundleUi.Models
+@using Engine.BundleUi.Services
+@inject BundleApiClient BundleApiClient
+
+<PageTitle>Approvals</PageTitle>
+
+<div class="approvals-shell">
+    <section class="hero">
+        <h1>Approval Inbox</h1>
+        <p>Manage manual approvals and review audit trail activity.</p>
+    </section>
+
+    <section class="panel">
+        <div class="panel-header">
+            <h2>Approvals</h2>
+            <button class="btn-secondary" @onclick="RefreshAsync" disabled="@IsBusy">Refresh</button>
+        </div>
+        <div class="filter-grid">
+            <div class="field-row">
+                <label>Status</label>
+                <select @bind="ApprovalStatusFilter">
+                    <option value="">Any</option>
+                    <option value="waiting">Waiting</option>
+                    <option value="approved">Approved</option>
+                    <option value="rejected">Rejected</option>
+                    <option value="expired">Expired</option>
+                    <option value="canceled">Canceled</option>
+                </select>
+            </div>
+            <div class="field-row">
+                <label>Workflow Name</label>
+                <input type="text" @bind="ApprovalWorkflowFilter" />
+            </div>
+            <div class="field-row">
+                <label>Instance Id</label>
+                <input type="text" @bind="ApprovalInstanceFilter" />
+            </div>
+            <div class="field-row">
+                <label>Assignee</label>
+                <input type="text" @bind="ApprovalAssigneeFilter" />
+            </div>
+            <div class="field-row">
+                <label>Step Id</label>
+                <input type="text" @bind="ApprovalStepFilter" />
+            </div>
+            <div class="field-row">
+                <label>Created After (local)</label>
+                <input type="datetime-local" value="@ApprovalCreatedAfterFilter" @onchange="e => ApprovalCreatedAfterFilter = e.Value?.ToString() ?? string.Empty" />
+            </div>
+            <div class="field-row">
+                <label>Created Before (local)</label>
+                <input type="datetime-local" value="@ApprovalCreatedBeforeFilter" @onchange="e => ApprovalCreatedBeforeFilter = e.Value?.ToString() ?? string.Empty" />
+            </div>
+            <div class="actions filter-actions">
+                <button class="btn-secondary" @onclick="ApplyApprovalFiltersAsync" disabled="@IsBusy">Apply</button>
+                <button class="btn-secondary" @onclick="ResetApprovalFiltersAsync" disabled="@IsBusy">Reset</button>
+            </div>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+        {
+            <div class="alert error">@ErrorMessage</div>
+        }
+        @if (!string.IsNullOrWhiteSpace(SuccessMessage))
+        {
+            <div class="alert success">@SuccessMessage</div>
+        }
+
+        @if (ApprovalItems.Count == 0)
+        {
+            <p>No approvals matched current filters.</p>
+        }
+        else
+        {
+            <div class="approval-list">
+                @foreach (var approval in ApprovalItems)
+                {
+                    var actionComment = ActionComments.GetValueOrDefault(approval.ApprovalId, string.Empty);
+                    <article class="approval-card">
+                        <div class="card-head">
+                            <div>
+                                <strong>@approval.WorkflowName v@approval.WorkflowVersion</strong>
+                                <div class="meta-line">
+                                    <code>@approval.InstanceId</code> / <code>@approval.StepId</code>
+                                </div>
+                            </div>
+                            <span class="status-pill @StatusClass(approval.Status)">@approval.Status</span>
+                        </div>
+
+                        <div class="form-grid">
+                            <div class="field-row">
+                                <label>Assignee</label>
+                                <input type="text" value="@GetAssignee(approval)" @oninput="e => SetAssignee(approval.ApprovalId, e.Value?.ToString())" />
+                            </div>
+                            <div class="field-row">
+                                <label>SLA / Expiry (UTC)</label>
+                                <input type="datetime-local" value="@GetExpiryInputValue(approval)" @onchange="e => SetExpiry(approval.ApprovalId, e.Value?.ToString())" />
+                            </div>
+                            <div class="field-row full">
+                                <label>Reason</label>
+                                <input type="text" value="@GetReason(approval)" @oninput="e => SetReason(approval.ApprovalId, e.Value?.ToString())" />
+                            </div>
+                            <div class="field-row full">
+                                <label>Comment</label>
+                                <textarea class="json-input short" value="@actionComment" @oninput="e => SetActionComment(approval.ApprovalId, e.Value?.ToString())"></textarea>
+                            </div>
+                        </div>
+
+                        <div class="actions">
+                            <button class="btn-secondary" @onclick="() => SaveMetadataAsync(approval)">Save Metadata</button>
+                            <button class="btn-accent" @onclick="() => ApproveAsync(approval)">Approve</button>
+                            <button class="btn-danger" @onclick="() => RejectAsync(approval)">Reject</button>
+                        </div>
+
+                        @if (approval.Comments.Count > 0)
+                        {
+                            <details>
+                                <summary>Comment Trail (@approval.Comments.Count)</summary>
+                                <ul class="comment-list">
+                                    @foreach (var comment in approval.Comments.OrderByDescending(x => x.At))
+                                    {
+                                        <li><strong>@comment.Author</strong> (@comment.At.LocalDateTime): @comment.Comment</li>
+                                    }
+                                </ul>
+                            </details>
+                        }
+                    </article>
+                }
+            </div>
+        }
+    </section>
+
+    <section class="panel">
+        <div class="panel-header">
+            <h2>Audit Trail</h2>
+            <button class="btn-secondary" @onclick="RefreshAuditAsync" disabled="@IsBusy">Refresh</button>
+        </div>
+        <div class="filter-grid">
+            <div class="field-row">
+                <label>Take</label>
+                <input type="number" min="1" max="1000" @bind="AuditTakeFilter" />
+            </div>
+            <div class="field-row">
+                <label>Category</label>
+                <input type="text" @bind="AuditCategoryFilter" />
+            </div>
+            <div class="field-row">
+                <label>Action</label>
+                <input type="text" @bind="AuditActionFilter" />
+            </div>
+            <div class="field-row">
+                <label>Actor</label>
+                <input type="text" @bind="AuditActorFilter" />
+            </div>
+            <div class="field-row">
+                <label>Workflow Name</label>
+                <input type="text" @bind="AuditWorkflowFilter" />
+            </div>
+            <div class="field-row">
+                <label>Instance Id</label>
+                <input type="text" @bind="AuditInstanceFilter" />
+            </div>
+            <div class="field-row">
+                <label>Created After (local)</label>
+                <input type="datetime-local" value="@AuditCreatedAfterFilter" @onchange="e => AuditCreatedAfterFilter = e.Value?.ToString() ?? string.Empty" />
+            </div>
+            <div class="field-row">
+                <label>Created Before (local)</label>
+                <input type="datetime-local" value="@AuditCreatedBeforeFilter" @onchange="e => AuditCreatedBeforeFilter = e.Value?.ToString() ?? string.Empty" />
+            </div>
+            <div class="actions filter-actions">
+                <button class="btn-secondary" @onclick="ApplyAuditFiltersAsync" disabled="@IsBusy">Apply</button>
+                <button class="btn-secondary" @onclick="ResetAuditFiltersAsync" disabled="@IsBusy">Reset</button>
+            </div>
+        </div>
+        @if (AuditEvents.Count == 0)
+        {
+            <p>No audit events yet.</p>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>When</th>
+                        <th>Category</th>
+                        <th>Action</th>
+                        <th>Actor</th>
+                        <th>Context</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var evt in AuditEvents)
+                    {
+                        <tr>
+                            <td>@evt.CreatedAt.LocalDateTime</td>
+                            <td>@evt.Category</td>
+                            <td>@evt.Action</td>
+                            <td>@evt.Actor</td>
+                            <td>
+                                @if (evt.InstanceId.HasValue)
+                                {
+                                    <code>@evt.InstanceId</code>
+                                }
+                                else if (!string.IsNullOrWhiteSpace(evt.WorkflowName))
+                                {
+                                    <span>@evt.WorkflowName</span>
+                                }
+                                else
+                                {
+                                    <span>-</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+</div>
+
+@code {
+    private IReadOnlyList<ApprovalRequest> ApprovalItems { get; set; } = [];
+    private IReadOnlyList<AuditEvent> AuditEvents { get; set; } = [];
+    private readonly Dictionary<Guid, string> AssigneeEdits = new();
+    private readonly Dictionary<Guid, string> ReasonEdits = new();
+    private readonly Dictionary<Guid, DateTimeOffset?> ExpiryEdits = new();
+    private readonly Dictionary<Guid, string> ActionComments = new();
+    private bool IsBusy { get; set; }
+    private string? ErrorMessage { get; set; }
+    private string? SuccessMessage { get; set; }
+    private string ApprovalStatusFilter { get; set; } = "waiting";
+    private string ApprovalWorkflowFilter { get; set; } = string.Empty;
+    private string ApprovalInstanceFilter { get; set; } = string.Empty;
+    private string ApprovalAssigneeFilter { get; set; } = string.Empty;
+    private string ApprovalStepFilter { get; set; } = string.Empty;
+    private string ApprovalCreatedAfterFilter { get; set; } = string.Empty;
+    private string ApprovalCreatedBeforeFilter { get; set; } = string.Empty;
+    private int AuditTakeFilter { get; set; } = 200;
+    private string AuditCategoryFilter { get; set; } = string.Empty;
+    private string AuditActionFilter { get; set; } = string.Empty;
+    private string AuditActorFilter { get; set; } = string.Empty;
+    private string AuditWorkflowFilter { get; set; } = string.Empty;
+    private string AuditInstanceFilter { get; set; } = string.Empty;
+    private string AuditCreatedAfterFilter { get; set; } = string.Empty;
+    private string AuditCreatedBeforeFilter { get; set; } = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        IsBusy = true;
+        ErrorMessage = null;
+        try
+        {
+            using var ct = new CancellationTokenSource();
+            ApprovalItems = await BundleApiClient.GetApprovalsAsync(BuildApprovalQuery(), ct.Token);
+            await RefreshAuditAsync();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task RefreshAuditAsync()
+    {
+        using var ct = new CancellationTokenSource();
+        AuditEvents = await BundleApiClient.GetAuditEventsAsync(BuildAuditQuery(), ct.Token);
+    }
+
+    private async Task ApplyApprovalFiltersAsync()
+    {
+        using var ct = new CancellationTokenSource();
+        ApprovalItems = await BundleApiClient.GetApprovalsAsync(BuildApprovalQuery(), ct.Token);
+    }
+
+    private async Task ResetApprovalFiltersAsync()
+    {
+        ApprovalStatusFilter = "waiting";
+        ApprovalWorkflowFilter = string.Empty;
+        ApprovalInstanceFilter = string.Empty;
+        ApprovalAssigneeFilter = string.Empty;
+        ApprovalStepFilter = string.Empty;
+        ApprovalCreatedAfterFilter = string.Empty;
+        ApprovalCreatedBeforeFilter = string.Empty;
+        await ApplyApprovalFiltersAsync();
+    }
+
+    private async Task ApplyAuditFiltersAsync()
+    {
+        using var ct = new CancellationTokenSource();
+        AuditEvents = await BundleApiClient.GetAuditEventsAsync(BuildAuditQuery(), ct.Token);
+    }
+
+    private async Task ResetAuditFiltersAsync()
+    {
+        AuditTakeFilter = 200;
+        AuditCategoryFilter = string.Empty;
+        AuditActionFilter = string.Empty;
+        AuditActorFilter = string.Empty;
+        AuditWorkflowFilter = string.Empty;
+        AuditInstanceFilter = string.Empty;
+        AuditCreatedAfterFilter = string.Empty;
+        AuditCreatedBeforeFilter = string.Empty;
+        await ApplyAuditFiltersAsync();
+    }
+
+    private async Task SaveMetadataAsync(ApprovalRequest approval)
+    {
+        await MutateApprovalAsync(async () =>
+        {
+            using var ct = new CancellationTokenSource();
+            return await BundleApiClient.UpdateApprovalAsync(
+                approval.ApprovalId,
+                AssigneeEdits.GetValueOrDefault(approval.ApprovalId, approval.Assignee ?? string.Empty),
+                ReasonEdits.GetValueOrDefault(approval.ApprovalId, approval.Reason ?? string.Empty),
+                ExpiryEdits.GetValueOrDefault(approval.ApprovalId, approval.ExpiresAt),
+                "manual",
+                ActionComments.GetValueOrDefault(approval.ApprovalId, string.Empty),
+                ct.Token);
+        }, "Approval metadata saved.");
+    }
+
+    private async Task ApproveAsync(ApprovalRequest approval)
+    {
+        await MutateApprovalAsync(async () =>
+        {
+            using var ct = new CancellationTokenSource();
+            return await BundleApiClient.ApproveAsync(
+                approval.ApprovalId,
+                "manual",
+                ActionComments.GetValueOrDefault(approval.ApprovalId, string.Empty),
+                ct.Token);
+        }, "Approval granted.");
+    }
+
+    private async Task RejectAsync(ApprovalRequest approval)
+    {
+        await MutateApprovalAsync(async () =>
+        {
+            using var ct = new CancellationTokenSource();
+            return await BundleApiClient.RejectAsync(
+                approval.ApprovalId,
+                "manual",
+                ActionComments.GetValueOrDefault(approval.ApprovalId, string.Empty),
+                ct.Token);
+        }, "Approval rejected.");
+    }
+
+    private async Task MutateApprovalAsync(Func<Task<ApprovalRequest>> action, string successMessage)
+    {
+        IsBusy = true;
+        ErrorMessage = null;
+        SuccessMessage = null;
+        try
+        {
+            _ = await action();
+            await RefreshAsync();
+            SuccessMessage = successMessage;
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private void SetAssignee(Guid approvalId, string? value) => AssigneeEdits[approvalId] = value ?? string.Empty;
+    private void SetReason(Guid approvalId, string? value) => ReasonEdits[approvalId] = value ?? string.Empty;
+    private void SetActionComment(Guid approvalId, string? value) => ActionComments[approvalId] = value ?? string.Empty;
+
+    private string GetAssignee(ApprovalRequest approval) => AssigneeEdits.GetValueOrDefault(approval.ApprovalId, approval.Assignee ?? string.Empty);
+    private string GetReason(ApprovalRequest approval) => ReasonEdits.GetValueOrDefault(approval.ApprovalId, approval.Reason ?? string.Empty);
+
+    private void SetExpiry(Guid approvalId, string? value)
+    {
+        if (DateTimeOffset.TryParse(value, out var parsed))
+        {
+            ExpiryEdits[approvalId] = parsed;
+            return;
+        }
+
+        ExpiryEdits[approvalId] = null;
+    }
+
+    private string GetExpiryInputValue(ApprovalRequest approval)
+    {
+        var value = ExpiryEdits.GetValueOrDefault(approval.ApprovalId, approval.ExpiresAt);
+        return value?.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm") ?? string.Empty;
+    }
+
+    private static string StatusClass(string status)
+    {
+        return status.ToLowerInvariant() switch
+        {
+            "waiting" => "waiting",
+            "approved" => "succeeded",
+            "rejected" => "failed",
+            "expired" => "canceled",
+            _ => "pending"
+        };
+    }
+
+    private ApprovalQuery BuildApprovalQuery()
+    {
+        return new ApprovalQuery(
+            string.IsNullOrWhiteSpace(ApprovalStatusFilter) ? null : ApprovalStatusFilter.Trim(),
+            ParseGuidOrNull(ApprovalInstanceFilter),
+            NormalizeNullable(ApprovalWorkflowFilter),
+            NormalizeNullable(ApprovalAssigneeFilter),
+            NormalizeNullable(ApprovalStepFilter),
+            ParseDateOrNull(ApprovalCreatedAfterFilter),
+            ParseDateOrNull(ApprovalCreatedBeforeFilter));
+    }
+
+    private AuditQuery BuildAuditQuery()
+    {
+        return new AuditQuery(
+            Math.Clamp(AuditTakeFilter, 1, 1000),
+            ParseGuidOrNull(AuditInstanceFilter),
+            NormalizeNullable(AuditWorkflowFilter),
+            NormalizeNullable(AuditCategoryFilter),
+            NormalizeNullable(AuditActionFilter),
+            NormalizeNullable(AuditActorFilter),
+            ParseDateOrNull(AuditCreatedAfterFilter),
+            ParseDateOrNull(AuditCreatedBeforeFilter));
+    }
+
+    private static string? NormalizeNullable(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static Guid? ParseGuidOrNull(string? value)
+    {
+        return Guid.TryParse(value, out var parsed) ? parsed : null;
+    }
+
+    private static DateTimeOffset? ParseDateOrNull(string? value)
+    {
+        return DateTimeOffset.TryParse(value, out var parsed) ? parsed : null;
+    }
+}

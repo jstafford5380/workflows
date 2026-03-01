@@ -24,6 +24,10 @@ public sealed class WorkflowDbContext : DbContext
 
     public DbSet<EventInboxEntity> EventInboxes => Set<EventInboxEntity>();
 
+    public DbSet<ApprovalRequestEntity> ApprovalRequests => Set<ApprovalRequestEntity>();
+
+    public DbSet<AuditEventEntity> AuditEvents => Set<AuditEventEntity>();
+
     public DbSet<OutboxMessageEntity> OutboxMessages => Set<OutboxMessageEntity>();
 
     public DbSet<WorkQueueItemEntity> WorkQueueItems => Set<WorkQueueItemEntity>();
@@ -104,6 +108,34 @@ public sealed class WorkflowDbContext : DbContext
             entity.Property(e => e.PayloadHash).HasMaxLength(128);
             entity.Property(e => e.PayloadJson).HasColumnType("text");
             entity.HasIndex(e => new { e.EventType, e.CorrelationKey, e.PayloadHash }).IsUnique();
+        });
+
+        modelBuilder.Entity<ApprovalRequestEntity>(entity =>
+        {
+            entity.HasKey(e => e.ApprovalId);
+            entity.Property(e => e.StepId).HasMaxLength(200);
+            entity.Property(e => e.EventType).HasMaxLength(200);
+            entity.Property(e => e.CorrelationKey).HasMaxLength(300);
+            entity.Property(e => e.Status).HasMaxLength(40);
+            entity.Property(e => e.Assignee).HasMaxLength(200);
+            entity.Property(e => e.Reason).HasColumnType("text");
+            entity.Property(e => e.CommentsJson).HasColumnType("text");
+            entity.HasIndex(e => e.SubscriptionId).IsUnique();
+            entity.HasIndex(e => new { e.Status, e.ExpiresAt, e.CreatedAt });
+            entity.HasIndex(e => new { e.InstanceId, e.StepId });
+        });
+
+        modelBuilder.Entity<AuditEventEntity>(entity =>
+        {
+            entity.HasKey(e => e.AuditId);
+            entity.Property(e => e.Category).HasMaxLength(80);
+            entity.Property(e => e.Action).HasMaxLength(120);
+            entity.Property(e => e.WorkflowName).HasMaxLength(200);
+            entity.Property(e => e.StepId).HasMaxLength(200);
+            entity.Property(e => e.Actor).HasMaxLength(200);
+            entity.Property(e => e.DetailsJson).HasColumnType("text");
+            entity.HasIndex(e => e.CreatedAt);
+            entity.HasIndex(e => new { e.InstanceId, e.CreatedAt });
         });
 
         modelBuilder.Entity<OutboxMessageEntity>(entity =>

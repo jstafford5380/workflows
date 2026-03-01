@@ -1,3 +1,4 @@
+using Engine.Api.Drafts;
 using Engine.Runtime.Contracts;
 using FastEndpoints;
 
@@ -6,10 +7,12 @@ namespace Engine.Api.Api.Workflows;
 public sealed class DeleteWorkflowDraftEndpoint : Endpoint<WorkflowDraftByIdRequest>
 {
     private readonly IWorkflowEngineService _engine;
+    private readonly IDraftScriptStore _draftScriptStore;
 
-    public DeleteWorkflowDraftEndpoint(IWorkflowEngineService engine)
+    public DeleteWorkflowDraftEndpoint(IWorkflowEngineService engine, IDraftScriptStore draftScriptStore)
     {
         _engine = engine;
+        _draftScriptStore = draftScriptStore;
     }
 
     public override void Configure()
@@ -39,6 +42,7 @@ public sealed class DeleteWorkflowDraftEndpoint : Endpoint<WorkflowDraftByIdRequ
             return;
         }
 
+        await _draftScriptStore.DeleteDraftScriptsAsync(req.DraftId, ct);
         HttpContext.Response.StatusCode = StatusCodes.Status204NoContent;
     }
 }

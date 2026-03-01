@@ -1,4 +1,5 @@
 using Engine.Api.Api.Common;
+using Engine.Api.Drafts;
 using Engine.Runtime.Contracts;
 using FastEndpoints;
 
@@ -6,11 +7,11 @@ namespace Engine.Api.Api.Workflows;
 
 public sealed class PublishWorkflowDraftEndpoint : Endpoint<WorkflowDraftByIdRequest, WorkflowVersionResponse>
 {
-    private readonly IWorkflowEngineService _engine;
+    private readonly IDraftWorkflowPublisher _draftWorkflowPublisher;
 
-    public PublishWorkflowDraftEndpoint(IWorkflowEngineService engine)
+    public PublishWorkflowDraftEndpoint(IDraftWorkflowPublisher draftWorkflowPublisher)
     {
-        _engine = engine;
+        _draftWorkflowPublisher = draftWorkflowPublisher;
     }
 
     public override void Configure()
@@ -35,7 +36,7 @@ public sealed class PublishWorkflowDraftEndpoint : Endpoint<WorkflowDraftByIdReq
     {
         try
         {
-            var metadata = await _engine.PublishWorkflowDraftAsync(req.DraftId, ct);
+            var metadata = await _draftWorkflowPublisher.PublishAsync(req.DraftId, ct);
             await HttpContext.Response.WriteAsJsonAsync(
                 new WorkflowVersionResponse(metadata.Name, metadata.Version, metadata.Revision),
                 cancellationToken: ct);

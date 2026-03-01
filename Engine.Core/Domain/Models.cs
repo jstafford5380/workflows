@@ -10,7 +10,8 @@ public sealed record WorkflowDefinitionMetadata(
     DateTimeOffset RegisteredAt,
     string? Description,
     string? Details,
-    WorkflowInputSchemaDefinition InputSchema);
+    WorkflowInputSchemaDefinition InputSchema,
+    WorkflowPolicyDefinition Policy);
 
 public sealed record WorkflowDraftSummary(
     Guid DraftId,
@@ -123,6 +124,7 @@ public sealed record ChecklistStepView(
     int Attempt,
     DateTimeOffset? StartedAt,
     DateTimeOffset? FinishedAt,
+    IReadOnlyList<string> DependsOn,
     IReadOnlyList<string> BlockedBy,
     string? LastError,
     IReadOnlyList<string> OutputKeys,
@@ -150,4 +152,42 @@ public sealed record StepExecutionLogView(
     int Attempt,
     bool IsSuccess,
     string ConsoleOutput,
+    DateTimeOffset CreatedAt);
+
+public sealed record ApprovalCommentRecord(
+    string Author,
+    string Comment,
+    DateTimeOffset At);
+
+public sealed record ApprovalRequestView(
+    Guid ApprovalId,
+    Guid InstanceId,
+    string WorkflowName,
+    int WorkflowVersion,
+    string StepId,
+    string EventType,
+    string CorrelationKey,
+    ApprovalRequestStatus Status,
+    string? Assignee,
+    string? Reason,
+    DateTimeOffset? ExpiresAt,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt,
+    DateTimeOffset? ResolvedAt,
+    IReadOnlyList<ApprovalCommentRecord> Comments);
+
+public sealed record ApprovalDecisionResult(
+    bool Applied,
+    ApprovalRequestView? Approval,
+    ExternalEventEnvelope? ResolutionEvent);
+
+public sealed record AuditEventView(
+    Guid AuditId,
+    string Category,
+    string Action,
+    Guid? InstanceId,
+    string? WorkflowName,
+    string? StepId,
+    string Actor,
+    JsonObject Details,
     DateTimeOffset CreatedAt);

@@ -60,6 +60,49 @@ public sealed class BundleApiClient
         return await HandleResponse<WorkflowDraft>(response, cancellationToken);
     }
 
+    public async Task<IReadOnlyList<DraftScript>> GetWorkflowDraftScriptsAsync(Guid draftId, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.GetAsync($"/workflow-drafts/{draftId:D}/scripts", cancellationToken);
+        return await HandleResponse<IReadOnlyList<DraftScript>>(response, cancellationToken);
+    }
+
+    public async Task<DraftScript> UploadWorkflowDraftScriptAsync(
+        Guid draftId,
+        IBrowserFile file,
+        string? scriptPath,
+        CancellationToken cancellationToken)
+    {
+        await using var stream = file.OpenReadStream(10 * 1024 * 1024, cancellationToken);
+        using var content = new MultipartFormDataContent();
+        using var streamContent = new StreamContent(stream);
+        streamContent.Headers.ContentType = new MediaTypeHeaderValue(file.ContentType);
+        content.Add(streamContent, "script", file.Name);
+        if (!string.IsNullOrWhiteSpace(scriptPath))
+        {
+            content.Add(new StringContent(scriptPath.Trim()), "scriptPath");
+        }
+
+        using var response = await _httpClient.PostAsync($"/workflow-drafts/{draftId:D}/scripts", content, cancellationToken);
+        return await HandleResponse<DraftScript>(response, cancellationToken);
+    }
+
+    public async Task DeleteWorkflowDraftScriptAsync(Guid draftId, string scriptPath, CancellationToken cancellationToken)
+    {
+        var escapedPath = string.Join('/',
+            scriptPath.Split('/', StringSplitOptions.RemoveEmptyEntries)
+                .Select(Uri.EscapeDataString));
+        using var response = await _httpClient.DeleteAsync(
+            $"/workflow-drafts/{draftId:D}/scripts/{escapedPath}",
+            cancellationToken);
+        if (response.IsSuccessStatusCode)
+        {
+            return;
+        }
+
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        throw new InvalidOperationException($"API request failed ({(int)response.StatusCode}): {body}");
+    }
+
     public async Task<WorkflowDraftSummary> CreateWorkflowDraftAsync(WorkflowDraftDefinition definition, CancellationToken cancellationToken)
     {
         var payload = new JsonObject
@@ -144,6 +187,22 @@ public sealed class BundleApiClient
         throw new InvalidOperationException($"API request failed ({(int)response.StatusCode}): {body}");
     }
 
+    public async Task RetryStepAsync(Guid instanceId, string stepId, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.PostAsync(
+            $"/instances/{instanceId:D}/steps/{Uri.EscapeDataString(stepId)}/retry",
+            null,
+            cancellationToken);
+
+        if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.Accepted)
+        {
+            return;
+        }
+
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        throw new InvalidOperationException($"API request failed ({(int)response.StatusCode}): {body}");
+    }
+
     public async Task<IReadOnlyList<StepExecutionLog>> GetStepExecutionLogsAsync(
         Guid instanceId,
         string stepId,
@@ -159,6 +218,98 @@ public sealed class BundleApiClient
     {
         using var response = await _httpClient.GetAsync("/instances", cancellationToken);
         return await HandleResponse<IReadOnlyList<WorkflowInstanceSummary>>(response, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<ApprovalRequest>> GetApprovalsAsync(ApprovalQuery query, CancellationToken cancellationToken)
+    {
+        var queryParts = new List<string>();
+        AddQuery(queryParts, "status", query.Status);
+        AddQuery(queryParts, "instanceId", query.InstanceId?.ToString("D"));
+        AddQuery(queryParts, "workflowName", query.WorkflowName);
+        AddQuery(queryParts, "assignee", query.Assignee);
+        AddQuery(queryParts, "stepId", query.StepId);
+        AddQuery(queryParts, "createdAfter", query.CreatedAfter?.ToString("O"));
+        AddQuery(queryParts, "createdBefore", query.CreatedBefore?.ToString("O"));
+        var uri = "/approvals" + BuildQuerySuffix(queryParts);
+        using var response = await _httpClient.GetAsync(uri, cancellationToken);
+        return await HandleResponse<IReadOnlyList<ApprovalRequest>>(response, cancellationToken);
+    }
+
+    public async Task<ApprovalRequest> ApproveAsync(Guid approvalId, string actor, string? comment, CancellationToken cancellationToken)
+    {
+        var payload = new JsonObject
+        {
+            ["actor"] = actor,
+            ["comment"] = string.IsNullOrWhiteSpace(comment) ? null : comment
+        };
+        using var content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json");
+        using var response = await _httpClient.PostAsync($"/approvals/{approvalId:D}/approve", content, cancellationToken);
+        return await HandleResponse<ApprovalRequest>(response, cancellationToken);
+    }
+
+    public async Task<ApprovalRequest> RejectAsync(Guid approvalId, string actor, string? comment, CancellationToken cancellationToken)
+    {
+        var payload = new JsonObject
+        {
+            ["actor"] = actor,
+            ["comment"] = string.IsNullOrWhiteSpace(comment) ? null : comment
+        };
+        using var content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json");
+        using var response = await _httpClient.PostAsync($"/approvals/{approvalId:D}/reject", content, cancellationToken);
+        return await HandleResponse<ApprovalRequest>(response, cancellationToken);
+    }
+
+    public async Task<ApprovalRequest> UpdateApprovalAsync(
+        Guid approvalId,
+        string? assignee,
+        string? reason,
+        DateTimeOffset? expiresAt,
+        string actor,
+        string? comment,
+        CancellationToken cancellationToken)
+    {
+        var payload = new JsonObject
+        {
+            ["assignee"] = string.IsNullOrWhiteSpace(assignee) ? null : assignee,
+            ["reason"] = string.IsNullOrWhiteSpace(reason) ? null : reason,
+            ["expiresAt"] = expiresAt,
+            ["actor"] = actor,
+            ["comment"] = string.IsNullOrWhiteSpace(comment) ? null : comment
+        };
+        using var content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json");
+        using var response = await _httpClient.PatchAsync($"/approvals/{approvalId:D}", content, cancellationToken);
+        return await HandleResponse<ApprovalRequest>(response, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<AuditEvent>> GetAuditEventsAsync(AuditQuery query, CancellationToken cancellationToken)
+    {
+        var queryParts = new List<string>();
+        AddQuery(queryParts, "take", query.Take.ToString());
+        AddQuery(queryParts, "instanceId", query.InstanceId?.ToString("D"));
+        AddQuery(queryParts, "workflowName", query.WorkflowName);
+        AddQuery(queryParts, "category", query.Category);
+        AddQuery(queryParts, "action", query.Action);
+        AddQuery(queryParts, "actor", query.Actor);
+        AddQuery(queryParts, "createdAfter", query.CreatedAfter?.ToString("O"));
+        AddQuery(queryParts, "createdBefore", query.CreatedBefore?.ToString("O"));
+        var uri = "/audit" + BuildQuerySuffix(queryParts);
+        using var response = await _httpClient.GetAsync(uri, cancellationToken);
+        return await HandleResponse<IReadOnlyList<AuditEvent>>(response, cancellationToken);
+    }
+
+    private static void AddQuery(List<string> queryParts, string key, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        queryParts.Add($"{Uri.EscapeDataString(key)}={Uri.EscapeDataString(value)}");
+    }
+
+    private static string BuildQuerySuffix(IReadOnlyList<string> queryParts)
+    {
+        return queryParts.Count == 0 ? string.Empty : "?" + string.Join("&", queryParts);
     }
 
     private static async Task<T> HandleResponse<T>(HttpResponseMessage response, CancellationToken cancellationToken)

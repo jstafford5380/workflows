@@ -96,6 +96,54 @@ public interface IInstanceRepository
         DateTimeOffset now,
         CancellationToken cancellationToken);
 
+    Task<IReadOnlyList<ApprovalRequestView>> ListApprovalRequestsAsync(
+        ApprovalRequestStatus? status,
+        Guid? instanceId,
+        string? workflowName,
+        string? assignee,
+        string? stepId,
+        DateTimeOffset? createdAfter,
+        DateTimeOffset? createdBefore,
+        DateTimeOffset now,
+        CancellationToken cancellationToken);
+
+    Task<ApprovalRequestView?> GetApprovalRequestAsync(Guid approvalId, DateTimeOffset now, CancellationToken cancellationToken);
+
+    Task<ApprovalRequestView?> UpdateApprovalMetadataAsync(
+        Guid approvalId,
+        string? assignee,
+        string? reason,
+        DateTimeOffset? expiresAt,
+        ApprovalCommentRecord? comment,
+        DateTimeOffset now,
+        CancellationToken cancellationToken);
+
+    Task<ApprovalRequestView?> AddApprovalCommentAsync(
+        Guid approvalId,
+        ApprovalCommentRecord comment,
+        DateTimeOffset now,
+        CancellationToken cancellationToken);
+
+    Task<ApprovalDecisionResult> ResolveApprovalAsync(
+        Guid approvalId,
+        bool approved,
+        ApprovalCommentRecord? comment,
+        DateTimeOffset now,
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<AuditEventView>> ListAuditEventsAsync(
+        int take,
+        Guid? instanceId,
+        string? workflowName,
+        string? category,
+        string? action,
+        string? actor,
+        DateTimeOffset? createdAfter,
+        DateTimeOffset? createdBefore,
+        CancellationToken cancellationToken);
+
+    Task AppendAuditEventAsync(AuditEventView auditEvent, CancellationToken cancellationToken);
+
     Task<IReadOnlyList<string>> PromoteDependentsToRunnableAsync(
         Guid instanceId,
         string completedStepId,

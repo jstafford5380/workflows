@@ -48,7 +48,8 @@ public sealed record WorkflowDefinitionMetadataResponse(
     DateTimeOffset RegisteredAt,
     string? Description,
     string? Details,
-    WorkflowInputSchemaDefinition InputSchema)
+    WorkflowInputSchemaDefinition InputSchema,
+    WorkflowPolicyDefinition Policy)
 {
     public static WorkflowDefinitionMetadataResponse FromModel(WorkflowDefinitionMetadata model)
     {
@@ -59,7 +60,8 @@ public sealed record WorkflowDefinitionMetadataResponse(
             model.RegisteredAt,
             model.Description,
             model.Details,
-            model.InputSchema);
+            model.InputSchema,
+            model.Policy);
     }
 }
 
@@ -77,6 +79,8 @@ public sealed record RegisterWorkflowRequest
 
     public WorkflowInputSchemaDefinition? InputSchema { get; init; }
 
+    public WorkflowPolicyDefinition? Policy { get; init; }
+
     public required IReadOnlyList<WorkflowStepDefinition> Steps { get; init; }
 
     public WorkflowDefinition ToDefinition()
@@ -88,6 +92,7 @@ public sealed record RegisterWorkflowRequest
             Description = Description,
             Details = Details,
             InputSchema = InputSchema ?? WorkflowInputSchemaDefinition.Empty,
+            Policy = Policy ?? WorkflowPolicyDefinition.Empty,
             Steps = Steps
         };
     }
@@ -101,6 +106,7 @@ public sealed record RegisterWorkflowRequest
             Description = definition.Description,
             Details = definition.Details,
             InputSchema = definition.InputSchema,
+            Policy = definition.Policy,
             Steps = definition.Steps
         };
     }
@@ -136,4 +142,30 @@ public sealed class StartWorkflowInstanceRequest
     public JsonObject? Inputs { get; init; }
 
     public int? Version { get; init; }
+}
+
+public sealed record DraftScriptResponse(string Path);
+
+public sealed class DraftScriptByPathRequest
+{
+    [RouteParam]
+    [BindFrom("draftId")]
+    public Guid DraftId { get; init; }
+
+    [RouteParam]
+    [BindFrom("scriptPath")]
+    public string ScriptPath { get; init; } = string.Empty;
+}
+
+public sealed class UploadDraftScriptRequest
+{
+    [RouteParam]
+    [BindFrom("draftId")]
+    public Guid DraftId { get; init; }
+
+    [BindFrom("script")]
+    public IFormFile? Script { get; init; }
+
+    [BindFrom("scriptPath")]
+    public string? ScriptPath { get; init; }
 }
