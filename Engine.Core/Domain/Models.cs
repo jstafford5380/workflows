@@ -3,7 +3,14 @@ using Engine.Core.Definitions;
 
 namespace Engine.Core.Domain;
 
-public sealed record WorkflowDefinitionMetadata(string Name, int Version, DateTimeOffset RegisteredAt);
+public sealed record WorkflowDefinitionMetadata(
+    string Name,
+    int Version,
+    int Revision,
+    DateTimeOffset RegisteredAt,
+    string? Description,
+    string? Details,
+    WorkflowInputSchemaDefinition InputSchema);
 
 public sealed record WorkflowInstanceRecord(
     Guid InstanceId,

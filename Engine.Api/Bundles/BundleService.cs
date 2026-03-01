@@ -203,6 +203,12 @@ public sealed class BundleService : IBundleService
             throw new InvalidOperationException("Bundle preview has validation errors; fix them before registration.");
         }
 
+        var existingDefinition = await workflowEngine.GetWorkflowDefinitionAsync(
+            preview.WorkflowDefinition.Name,
+            preview.WorkflowDefinition.Version,
+            cancellationToken);
+        var priorBundleIds = CollectBundleIds(existingDefinition);
+
         var bundleId = Guid.NewGuid().ToString("N");
         var bundleRoot = Path.Combine(GetStorageRootPath(), bundleId);
         Directory.CreateDirectory(bundleRoot);
@@ -231,28 +237,36 @@ public sealed class BundleService : IBundleService
 
         var transformedDefinition = preview.WorkflowDefinition with { Steps = transformedSteps };
 
-        await workflowEngine.RegisterWorkflowDefinitionAsync(transformedDefinition, cancellationToken);
+        var registrationMetadata = await workflowEngine.RegisterWorkflowDefinitionAsync(transformedDefinition, cancellationToken);
 
         var metadataPath = Path.Combine(bundleRoot, "bundle-metadata.json");
         var metadata = new
         {
             bundleId,
             preview.BundleFileName,
-            preview.WorkflowDefinition.Name,
-            preview.WorkflowDefinition.Version,
-            registeredAt = DateTimeOffset.UtcNow,
+            registrationMetadata.Name,
+            registrationMetadata.Version,
+            registrationMetadata.Revision,
+            registrationMetadata.RegisteredAt,
             preview.Files
         };
 
         await File.WriteAllTextAsync(metadataPath, JsonSerializer.Serialize(metadata, JsonOptions), cancellationToken);
 
+        foreach (var priorBundleId in priorBundleIds.Where(x => !string.Equals(x, bundleId, StringComparison.OrdinalIgnoreCase)))
+        {
+            var priorBundleRoot = Path.Combine(GetStorageRootPath(), priorBundleId);
+            TryDeleteDirectory(priorBundleRoot);
+        }
+
         CleanupPreview(preview.PreviewId, preview.PreviewRoot);
 
         return new BundleRegisterResponse(
             bundleId,
-            transformedDefinition.Name,
-            transformedDefinition.Version,
-            DateTimeOffset.UtcNow);
+            registrationMetadata.Name,
+            registrationMetadata.Version,
+            registrationMetadata.Revision,
+            registrationMetadata.RegisteredAt);
     }
 
     private BundlePreviewResponse StoreAndCreateResponse(BundlePreviewState state)
@@ -270,6 +284,7 @@ public sealed class BundleService : IBundleService
             state.WorkflowDefinition.Version,
             state.WorkflowDefinition.Description,
             state.WorkflowDefinition.Details,
+            state.WorkflowDefinition.InputSchema,
             state.Steps,
             state.Files,
             state.ExecutionPlan,
@@ -399,6 +414,39 @@ public sealed class BundleService : IBundleService
 
         normalizedPath = string.Join('/', segments);
         return true;
+    }
+
+    private static HashSet<string> CollectBundleIds(WorkflowDefinition? definition)
+    {
+        var bundleIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (definition is null)
+        {
+            return bundleIds;
+        }
+
+        foreach (var step in definition.Steps)
+        {
+            const string prefix = "bundle://";
+            if (!step.ActivityRef.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var remainder = step.ActivityRef[prefix.Length..];
+            var slashIndex = remainder.IndexOf('/');
+            if (slashIndex <= 0)
+            {
+                continue;
+            }
+
+            var bundleId = remainder[..slashIndex];
+            if (Guid.TryParse(bundleId, out _))
+            {
+                bundleIds.Add(bundleId);
+            }
+        }
+
+        return bundleIds;
     }
 
     private static void ExtractZipSafely(Stream zipStream, string destinationDirectory, CancellationToken cancellationToken)

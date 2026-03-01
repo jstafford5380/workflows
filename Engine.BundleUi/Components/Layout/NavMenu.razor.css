@@ -1,34 +1,66 @@
 .brand-shell {
-    padding: 1.2rem 1rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.25);
+    padding: 1.35rem 1.05rem 1rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.brand-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.24rem 0.55rem;
+    border-radius: 999px;
+    background: rgba(56, 189, 248, 0.16);
+    border: 1px solid rgba(56, 189, 248, 0.42);
+    color: #8bdfff;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 0.75rem;
 }
 
 .brand-title {
-    font-size: 1.05rem;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+    font-size: 1.18rem;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    color: var(--text);
 }
 
 .brand-subtitle {
-    margin-top: 0.2rem;
-    font-size: 0.8rem;
-    opacity: 0.8;
+    margin-top: 0.26rem;
+    font-size: 0.78rem;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
 }
 
 .main-nav {
     display: grid;
-    padding: 0.7rem;
+    gap: 0.42rem;
+    padding: 0.75rem;
 }
 
 .nav-link {
-    color: #f7fbff;
+    color: var(--text-soft);
     text-decoration: none;
-    border-radius: 10px;
-    padding: 0.55rem 0.7rem;
+    border-radius: 12px;
+    padding: 0.62rem 0.72rem;
+    border: 1px solid transparent;
+    display: flex;
+    align-items: center;
+    gap: 0.52rem;
+    transition: all 0.2s ease;
+}
+
+.nav-icon {
+    width: 1.2rem;
+    text-align: center;
+    font-size: 0.86rem;
+    opacity: 0.85;
 }
 
 .nav-link.active,
 .nav-link:hover {
-    background: rgba(255, 255, 255, 0.16);
+    background: rgba(59, 130, 246, 0.14);
+    border-color: rgba(56, 189, 248, 0.3);
+    color: var(--text);
 }

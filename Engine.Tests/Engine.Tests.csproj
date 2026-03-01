@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Engine.Core\Engine.Core.csproj" />
+    <ProjectReference Include="..\Engine.Persistence\Engine.Persistence.csproj" />
     <ProjectReference Include="..\Engine.Runtime\Engine.Runtime.csproj" />
   </ItemGroup>
 

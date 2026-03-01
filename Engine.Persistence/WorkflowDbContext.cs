@@ -37,6 +37,7 @@ public sealed class WorkflowDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => new { e.Name, e.Version }).IsUnique();
             entity.Property(e => e.Name).HasMaxLength(200);
+            entity.Property(e => e.Revision).HasDefaultValue(1);
             entity.Property(e => e.DefinitionJson).HasColumnType("text");
         });
 

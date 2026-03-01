@@ -1,3 +1,5 @@
+using Engine.Core.Definitions;
+
 namespace Engine.Api.Bundles;
 
 public sealed record BundleStepPreview(
@@ -19,6 +21,7 @@ public sealed record BundlePreviewResponse(
     int WorkflowVersion,
     string? WorkflowDescription,
     string? WorkflowDetails,
+    WorkflowInputSchemaDefinition WorkflowInputSchema,
     IReadOnlyList<BundleStepPreview> Steps,
     IReadOnlyList<string> Files,
     IReadOnlyList<ExecutionPlanStage> ExecutionPlan,
@@ -30,4 +33,5 @@ public sealed record BundleRegisterResponse(
     string BundleId,
     string WorkflowName,
     int WorkflowVersion,
+    int WorkflowRevision,
     DateTimeOffset RegisteredAt);

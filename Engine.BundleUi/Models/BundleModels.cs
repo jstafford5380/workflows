@@ -1,3 +1,5 @@
+using System.Text.Json.Nodes;
+
 namespace Engine.BundleUi.Models;
 
 public sealed record BundleStepPreview(
@@ -19,6 +21,7 @@ public sealed record BundlePreviewResponse(
     int WorkflowVersion,
     string? WorkflowDescription,
     string? WorkflowDetails,
+    WorkflowInputSchema WorkflowInputSchema,
     IReadOnlyList<BundleStepPreview> Steps,
     IReadOnlyList<string> Files,
     IReadOnlyList<ExecutionPlanStage> ExecutionPlan,
@@ -30,12 +33,33 @@ public sealed record BundleRegisterResponse(
     string BundleId,
     string WorkflowName,
     int WorkflowVersion,
+    int WorkflowRevision,
     DateTimeOffset RegisteredAt);
 
 public sealed record WorkflowDefinitionMetadata(
     string Name,
     int Version,
-    DateTimeOffset RegisteredAt);
+    int Revision,
+    DateTimeOffset RegisteredAt,
+    string? Description,
+    string? Details,
+    WorkflowInputSchema InputSchema);
+
+public sealed record WorkflowInputSchema(IReadOnlyList<WorkflowInputField> Fields)
+{
+    public static WorkflowInputSchema Empty { get; } = new([]);
+}
+
+public sealed record WorkflowInputField(
+    string Name,
+    string? DisplayName,
+    string Type,
+    bool Required,
+    string? Description,
+    string? Placeholder,
+    JsonNode? DefaultValue,
+    bool IsSecret,
+    IReadOnlyList<string> Options);
 
 public sealed record WorkflowInstanceStep(
     string StepId,

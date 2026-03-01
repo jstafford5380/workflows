@@ -66,9 +66,9 @@ public sealed class SeedProvisionSkeletonEndpoint : EndpointWithoutRequest<Workf
 
         try
         {
-            await _engine.RegisterWorkflowDefinitionAsync(definition, ct);
+            var metadata = await _engine.RegisterWorkflowDefinitionAsync(definition, ct);
             await HttpContext.Response.WriteAsJsonAsync(
-                new WorkflowVersionResponse(definition.Name, definition.Version),
+                new WorkflowVersionResponse(metadata.Name, metadata.Version, metadata.Revision),
                 cancellationToken: ct);
         }
         catch (InvalidOperationException ex)

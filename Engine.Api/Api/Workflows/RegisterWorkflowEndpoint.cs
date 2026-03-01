@@ -39,11 +39,13 @@ public sealed class RegisterWorkflowEndpoint : Endpoint<RegisterWorkflowRequest,
         try
         {
             var definition = req.ToDefinition();
-            await _engine.RegisterWorkflowDefinitionAsync(definition, ct);
+            var metadata = await _engine.RegisterWorkflowDefinitionAsync(definition, ct);
 
             HttpContext.Response.StatusCode = StatusCodes.Status202Accepted;
             HttpContext.Response.Headers.Location = $"/workflows/{definition.Name}";
-            await HttpContext.Response.WriteAsJsonAsync(new WorkflowVersionResponse(definition.Name, definition.Version), cancellationToken: ct);
+            await HttpContext.Response.WriteAsJsonAsync(
+                new WorkflowVersionResponse(metadata.Name, metadata.Version, metadata.Revision),
+                cancellationToken: ct);
         }
         catch (InvalidOperationException ex)
         {

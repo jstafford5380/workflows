@@ -5,13 +5,27 @@ using FastEndpoints;
 
 namespace Engine.Api.Api.Workflows;
 
-public sealed record WorkflowVersionResponse(string Name, int Version);
+public sealed record WorkflowVersionResponse(string Name, int Version, int Revision);
 
-public sealed record WorkflowDefinitionMetadataResponse(string Name, int Version, DateTimeOffset RegisteredAt)
+public sealed record WorkflowDefinitionMetadataResponse(
+    string Name,
+    int Version,
+    int Revision,
+    DateTimeOffset RegisteredAt,
+    string? Description,
+    string? Details,
+    WorkflowInputSchemaDefinition InputSchema)
 {
     public static WorkflowDefinitionMetadataResponse FromModel(WorkflowDefinitionMetadata model)
     {
-        return new WorkflowDefinitionMetadataResponse(model.Name, model.Version, model.RegisteredAt);
+        return new WorkflowDefinitionMetadataResponse(
+            model.Name,
+            model.Version,
+            model.Revision,
+            model.RegisteredAt,
+            model.Description,
+            model.Details,
+            model.InputSchema);
     }
 }
 
@@ -27,6 +41,8 @@ public sealed record RegisterWorkflowRequest
 
     public string? Details { get; init; }
 
+    public WorkflowInputSchemaDefinition? InputSchema { get; init; }
+
     public required IReadOnlyList<WorkflowStepDefinition> Steps { get; init; }
 
     public WorkflowDefinition ToDefinition()
@@ -37,6 +53,7 @@ public sealed record RegisterWorkflowRequest
             Version = Version,
             Description = Description,
             Details = Details,
+            InputSchema = InputSchema ?? WorkflowInputSchemaDefinition.Empty,
             Steps = Steps
         };
     }

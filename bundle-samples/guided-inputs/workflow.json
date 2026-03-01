@@ -1,0 +1,133 @@
+{
+  "name": "guided-inputs-bundle",
+  "version": 1,
+  "description": "Sample workflow for testing guided input forms.",
+  "details": "Uses typed input schema fields and echoes them through script outputs so UI and runtime behavior are easy to verify.",
+  "inputSchema": {
+    "fields": [
+      {
+        "name": "projectName",
+        "displayName": "Project Name",
+        "type": "string",
+        "required": true,
+        "description": "Human-readable name for the project.",
+        "placeholder": "e.g. platform-infra"
+      },
+      {
+        "name": "projectTier",
+        "displayName": "Project Tier",
+        "type": "string",
+        "required": true,
+        "description": "Select the provisioning tier.",
+        "defaultValue": "standard",
+        "options": ["basic", "standard", "premium"]
+      },
+      {
+        "name": "billingAccount",
+        "displayName": "Billing Account ID",
+        "type": "string",
+        "required": true,
+        "description": "Billing account identifier used during provisioning.",
+        "placeholder": "e.g. 000AAA-111BBB-222CCC",
+        "isSecret": true
+      },
+      {
+        "name": "instanceCount",
+        "displayName": "Instance Count",
+        "type": "number",
+        "required": true,
+        "description": "Number of instances to provision.",
+        "defaultValue": 2
+      },
+      {
+        "name": "enableBudget",
+        "displayName": "Enable Budget",
+        "type": "boolean",
+        "required": false,
+        "description": "Enable budget controls for the new project.",
+        "defaultValue": true
+      },
+      {
+        "name": "labels",
+        "displayName": "Labels",
+        "type": "object",
+        "required": false,
+        "description": "JSON object of metadata labels.",
+        "defaultValue": {
+          "team": "platform",
+          "environment": "dev"
+        }
+      },
+      {
+        "name": "regions",
+        "displayName": "Regions",
+        "type": "array",
+        "required": true,
+        "description": "JSON array of deployment regions.",
+        "defaultValue": ["us-central1", "us-east1"]
+      }
+    ]
+  },
+  "steps": [
+    {
+      "stepId": "CaptureInputs",
+      "displayName": "Capture Inputs",
+      "activityRef": "capture-inputs.sh",
+      "inputs": {
+        "projectName": { "binding": "$.inputs.projectName" },
+        "projectTier": { "binding": "$.inputs.projectTier" },
+        "billingAccount": { "binding": "$.inputs.billingAccount" },
+        "instanceCount": { "binding": "$.inputs.instanceCount" },
+        "enableBudget": { "binding": "$.inputs.enableBudget" },
+        "labels": { "binding": "$.inputs.labels" },
+        "regions": { "binding": "$.inputs.regions" }
+      },
+      "scriptParameters": [
+        { "name": "projectName", "required": true },
+        { "name": "projectTier", "required": true },
+        { "name": "billingAccount", "required": true },
+        { "name": "instanceCount", "required": true },
+        { "name": "enableBudget", "required": false },
+        { "name": "labels", "required": false },
+        { "name": "regions", "required": true }
+      ],
+      "outputsSchema": ["projectName", "projectTier", "instanceCount", "enableBudget", "labelsJson", "regionsJson", "summary"],
+      "retryPolicy": {
+        "maxAttempts": 2,
+        "initialDelaySeconds": 2,
+        "maxDelaySeconds": 15,
+        "backoffFactor": 2.0
+      },
+      "abortOnFail": true,
+      "timeoutSeconds": 60,
+      "safetyMetadata": {
+        "createsResources": false,
+        "changesIam": false
+      }
+    },
+    {
+      "stepId": "Finalize",
+      "displayName": "Finalize",
+      "activityRef": "finalize.sh",
+      "inputs": {
+        "summary": { "binding": "$.steps.CaptureInputs.outputs.summary" }
+      },
+      "scriptParameters": [
+        { "name": "summary", "required": true }
+      ],
+      "outputsSchema": ["result"],
+      "retryPolicy": {
+        "maxAttempts": 2,
+        "initialDelaySeconds": 2,
+        "maxDelaySeconds": 15,
+        "backoffFactor": 2.0
+      },
+      "abortOnFail": true,
+      "timeoutSeconds": 60,
+      "safetyMetadata": {
+        "createsResources": false,
+        "changesIam": false
+      }
+    }
+  ]
+}

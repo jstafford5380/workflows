@@ -6,9 +6,11 @@ namespace Engine.Runtime.Contracts;
 
 public interface IWorkflowEngineService
 {
-    Task RegisterWorkflowDefinitionAsync(WorkflowDefinition definition, CancellationToken cancellationToken);
+    Task<WorkflowDefinitionMetadata> RegisterWorkflowDefinitionAsync(WorkflowDefinition definition, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<WorkflowDefinitionMetadata>> ListWorkflowDefinitionsAsync(CancellationToken cancellationToken);
+
+    Task<WorkflowDefinition?> GetWorkflowDefinitionAsync(string workflowName, int? version, CancellationToken cancellationToken);
 
     Task<WorkflowInstanceChecklistView> StartWorkflowAsync(
         string workflowName,

@@ -8,6 +8,8 @@ public sealed class WorkflowDefinitionEntity
 
     public int Version { get; set; }
 
+    public int Revision { get; set; }
+
     public required string DefinitionJson { get; set; }
 
     public DateTimeOffset RegisteredAt { get; set; }

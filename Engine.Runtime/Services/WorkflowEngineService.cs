@@ -25,7 +25,7 @@ public sealed class WorkflowEngineService : IWorkflowEngineService
         _clock = clock;
     }
 
-    public async Task RegisterWorkflowDefinitionAsync(WorkflowDefinition definition, CancellationToken cancellationToken)
+    public async Task<WorkflowDefinitionMetadata> RegisterWorkflowDefinitionAsync(WorkflowDefinition definition, CancellationToken cancellationToken)
     {
         var validation = WorkflowDefinitionValidator.Validate(definition);
         if (!validation.IsValid)
@@ -33,12 +33,17 @@ public sealed class WorkflowEngineService : IWorkflowEngineService
             throw new InvalidOperationException($"Invalid workflow definition: {string.Join("; ", validation.Errors)}");
         }
 
-        await _workflowRepository.RegisterDefinitionAsync(definition, cancellationToken);
+        return await _workflowRepository.RegisterDefinitionAsync(definition, cancellationToken);
     }
 
     public Task<IReadOnlyList<WorkflowDefinitionMetadata>> ListWorkflowDefinitionsAsync(CancellationToken cancellationToken)
     {
         return _workflowRepository.ListDefinitionsAsync(cancellationToken);
+    }
+
+    public Task<WorkflowDefinition?> GetWorkflowDefinitionAsync(string workflowName, int? version, CancellationToken cancellationToken)
+    {
+        return _workflowRepository.GetDefinitionAsync(workflowName, version, cancellationToken);
     }
 
     public async Task<WorkflowInstanceChecklistView> StartWorkflowAsync(
@@ -60,6 +65,14 @@ public sealed class WorkflowEngineService : IWorkflowEngineService
         if (!graph.IsValid)
         {
             throw new InvalidOperationException($"Workflow '{workflowName}' has invalid dependencies: {string.Join("; ", graph.Errors)}");
+        }
+
+        var normalizedInputs = WorkflowInputRuntimeValidator.ApplyDefaults(definition.InputSchema, inputs);
+        var inputValidation = WorkflowInputRuntimeValidator.Validate(definition.InputSchema, normalizedInputs);
+        if (!inputValidation.IsValid)
+        {
+            throw new InvalidOperationException(
+                $"Workflow inputs failed schema validation: {string.Join("; ", inputValidation.Errors)}");
         }
 
         var now = _clock.UtcNow;
@@ -115,7 +128,7 @@ public sealed class WorkflowEngineService : IWorkflowEngineService
             definition.Name,
             definition.Version,
             WorkflowInstanceStatus.Running,
-            inputs.DeepClone()!.AsObject(),
+            normalizedInputs,
             now,
             now);
 

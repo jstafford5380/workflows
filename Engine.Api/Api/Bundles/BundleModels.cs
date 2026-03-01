@@ -1,4 +1,5 @@
 using FastEndpoints;
+using Engine.Core.Definitions;
 
 namespace Engine.Api.Api.Bundles;
 
@@ -61,6 +62,7 @@ public sealed record BundlePreviewApiResponse(
     int WorkflowVersion,
     string? WorkflowDescription,
     string? WorkflowDetails,
+    WorkflowInputSchemaDefinition WorkflowInputSchema,
     IReadOnlyList<BundleStepPreviewResponse> Steps,
     IReadOnlyList<string> Files,
     IReadOnlyList<ExecutionPlanStageResponse> ExecutionPlan,
@@ -77,6 +79,7 @@ public sealed record BundlePreviewApiResponse(
             model.WorkflowVersion,
             model.WorkflowDescription,
             model.WorkflowDetails,
+            model.WorkflowInputSchema,
             model.Steps.Select(BundleStepPreviewResponse.FromModel).ToList(),
             model.Files,
             model.ExecutionPlan.Select(ExecutionPlanStageResponse.FromModel).ToList(),
@@ -90,6 +93,7 @@ public sealed record BundleRegisterApiResponse(
     string BundleId,
     string WorkflowName,
     int WorkflowVersion,
+    int WorkflowRevision,
     DateTimeOffset RegisteredAt)
 {
     public static BundleRegisterApiResponse FromModel(Engine.Api.Bundles.BundleRegisterResponse model)
@@ -98,6 +102,7 @@ public sealed record BundleRegisterApiResponse(
             model.BundleId,
             model.WorkflowName,
             model.WorkflowVersion,
+            model.WorkflowRevision,
             model.RegisteredAt);
     }
 }

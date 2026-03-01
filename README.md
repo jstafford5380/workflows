@@ -159,6 +159,8 @@ Source sample bundle assets:
 
 - `bundle-samples/provision-skeleton/workflow.json`
 - `bundle-samples/provision-skeleton/scripts/*.sh`
+- `bundle-samples/guided-inputs/workflow.json`
+- `bundle-samples/guided-inputs/scripts/*.sh`
 
 Create zip:
 
@@ -194,6 +196,32 @@ curl -s -X POST http://localhost:5000/events \
     "eventType":"approval",
     "correlationKey":"<INSTANCE_ID>",
     "payload":{"approved":true}
+  }'
+```
+
+Guided form sample (no wait step):
+
+```bash
+cd bundle-samples/guided-inputs
+zip -r ../../guided-inputs-bundle.zip .
+
+curl -s -X POST http://localhost:5000/bundles/preview \
+  -F bundle=@guided-inputs-bundle.zip
+
+curl -s -X POST http://localhost:5000/bundles/previews/<PREVIEW_ID>/register
+
+curl -s -X POST http://localhost:5000/workflows/guided-inputs-bundle/instances \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "inputs":{
+      "projectName":"platform-infra",
+      "projectTier":"standard",
+      "billingAccount":"000AAA-111BBB-222CCC",
+      "instanceCount":3,
+      "enableBudget":true,
+      "labels":{"team":"platform","environment":"dev"},
+      "regions":["us-central1","us-east1"]
+    }
   }'
 ```
 

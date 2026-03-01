@@ -12,7 +12,37 @@ public sealed record WorkflowDefinition
 
     public string? Details { get; init; }
 
+    public WorkflowInputSchemaDefinition InputSchema { get; init; } = WorkflowInputSchemaDefinition.Empty;
+
     public required IReadOnlyList<WorkflowStepDefinition> Steps { get; init; }
+}
+
+public sealed record WorkflowInputSchemaDefinition
+{
+    public static WorkflowInputSchemaDefinition Empty { get; } = new();
+
+    public IReadOnlyList<WorkflowInputFieldDefinition> Fields { get; init; } = [];
+}
+
+public sealed record WorkflowInputFieldDefinition
+{
+    public required string Name { get; init; }
+
+    public string? DisplayName { get; init; }
+
+    public string Type { get; init; } = "string";
+
+    public bool Required { get; init; } = true;
+
+    public string? Description { get; init; }
+
+    public string? Placeholder { get; init; }
+
+    public JsonNode? DefaultValue { get; init; }
+
+    public bool IsSecret { get; init; }
+
+    public IReadOnlyList<string> Options { get; init; } = [];
 }
 
 public sealed record WorkflowStepDefinition

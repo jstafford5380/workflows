@@ -30,6 +30,78 @@ public static class WorkflowDefinitionValidator
             return new ValidationResult(false, errors);
         }
 
+        var allowedInputTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "string",
+            "number",
+            "boolean",
+            "object",
+            "array"
+        };
+        var seenInputFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var field in definition.InputSchema.Fields)
+        {
+            if (string.IsNullOrWhiteSpace(field.Name))
+            {
+                errors.Add("InputSchema field name is required.");
+                continue;
+            }
+
+            if (!seenInputFields.Add(field.Name))
+            {
+                errors.Add($"InputSchema has duplicate field '{field.Name}'.");
+            }
+
+            if (string.IsNullOrWhiteSpace(field.Type) || !allowedInputTypes.Contains(field.Type))
+            {
+                errors.Add(
+                    $"InputSchema field '{field.Name}' has unsupported type '{field.Type}'. Allowed: string, number, boolean, object, array.");
+            }
+
+            if (field.IsSecret && !field.Type.Equals("string", StringComparison.OrdinalIgnoreCase))
+            {
+                errors.Add($"InputSchema field '{field.Name}' can only set isSecret=true when type is 'string'.");
+            }
+
+            if (field.Options.Count > 0)
+            {
+                if (!field.Type.Equals("string", StringComparison.OrdinalIgnoreCase))
+                {
+                    errors.Add($"InputSchema field '{field.Name}' options are only supported for type 'string'.");
+                }
+
+                var seenOptions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var option in field.Options)
+                {
+                    if (string.IsNullOrWhiteSpace(option))
+                    {
+                        errors.Add($"InputSchema field '{field.Name}' has an empty option value.");
+                        continue;
+                    }
+
+                    if (!seenOptions.Add(option))
+                    {
+                        errors.Add($"InputSchema field '{field.Name}' has duplicate option '{option}'.");
+                    }
+                }
+            }
+
+            if (field.DefaultValue is not null)
+            {
+                if (!MatchesSchemaType(field.DefaultValue, field.Type))
+                {
+                    errors.Add($"InputSchema field '{field.Name}' defaultValue does not match type '{field.Type}'.");
+                }
+                else if (field.Options.Count > 0
+                         && field.DefaultValue.GetValueKind() == System.Text.Json.JsonValueKind.String
+                         && !field.Options.Contains(field.DefaultValue.ToString(), StringComparer.OrdinalIgnoreCase))
+                {
+                    errors.Add(
+                        $"InputSchema field '{field.Name}' defaultValue '{field.DefaultValue}' must be one of the declared options.");
+                }
+            }
+        }
+
         var seenStepIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var step in definition.Steps)
         {
@@ -141,5 +213,19 @@ public static class WorkflowDefinitionValidator
         errors.AddRange(graph.Errors);
 
         return new ValidationResult(errors.Count == 0, errors);
+    }
+
+    private static bool MatchesSchemaType(System.Text.Json.Nodes.JsonNode value, string fieldType)
+    {
+        var kind = value.GetValueKind();
+        return fieldType.ToLowerInvariant() switch
+        {
+            "string" => kind == System.Text.Json.JsonValueKind.String,
+            "number" => kind == System.Text.Json.JsonValueKind.Number,
+            "boolean" => kind == System.Text.Json.JsonValueKind.True || kind == System.Text.Json.JsonValueKind.False,
+            "object" => kind == System.Text.Json.JsonValueKind.Object,
+            "array" => kind == System.Text.Json.JsonValueKind.Array,
+            _ => false
+        };
     }
 }
