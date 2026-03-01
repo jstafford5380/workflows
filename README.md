@@ -153,6 +153,15 @@ Existing workflow endpoints remain:
 - `GET /instances/{instanceId}/steps/{stepId}/logs`
 - `POST /events`
 
+Recipe draft authoring endpoints:
+
+- `GET /workflow-drafts`
+- `POST /workflow-drafts`
+- `GET /workflow-drafts/{draftId}`
+- `PUT /workflow-drafts/{draftId}`
+- `DELETE /workflow-drafts/{draftId}`
+- `POST /workflow-drafts/{draftId}/publish`
+
 ## Sample Bundle
 
 Source sample bundle assets:

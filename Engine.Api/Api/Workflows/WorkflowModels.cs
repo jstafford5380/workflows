@@ -7,6 +7,40 @@ namespace Engine.Api.Api.Workflows;
 
 public sealed record WorkflowVersionResponse(string Name, int Version, int Revision);
 
+public sealed record WorkflowDraftSummaryResponse(
+    Guid DraftId,
+    string Name,
+    int Version,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt)
+{
+    public static WorkflowDraftSummaryResponse FromModel(WorkflowDraftSummary model)
+    {
+        return new WorkflowDraftSummaryResponse(
+            model.DraftId,
+            model.Name,
+            model.Version,
+            model.CreatedAt,
+            model.UpdatedAt);
+    }
+}
+
+public sealed record WorkflowDraftResponse(
+    Guid DraftId,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt,
+    RegisterWorkflowRequest Definition)
+{
+    public static WorkflowDraftResponse FromModel(WorkflowDraftRecord model)
+    {
+        return new WorkflowDraftResponse(
+            model.DraftId,
+            model.CreatedAt,
+            model.UpdatedAt,
+            RegisterWorkflowRequest.FromDefinition(model.Definition));
+    }
+}
+
 public sealed record WorkflowDefinitionMetadataResponse(
     string Name,
     int Version,
@@ -57,6 +91,40 @@ public sealed record RegisterWorkflowRequest
             Steps = Steps
         };
     }
+
+    public static RegisterWorkflowRequest FromDefinition(WorkflowDefinition definition)
+    {
+        return new RegisterWorkflowRequest
+        {
+            Name = definition.Name,
+            Version = definition.Version,
+            Description = definition.Description,
+            Details = definition.Details,
+            InputSchema = definition.InputSchema,
+            Steps = definition.Steps
+        };
+    }
+}
+
+public sealed class WorkflowDraftRequest
+{
+    public required RegisterWorkflowRequest Definition { get; init; }
+}
+
+public sealed class WorkflowDraftByIdRequest
+{
+    [RouteParam]
+    [BindFrom("draftId")]
+    public Guid DraftId { get; init; }
+}
+
+public sealed class UpdateWorkflowDraftRequest
+{
+    [RouteParam]
+    [BindFrom("draftId")]
+    public Guid DraftId { get; init; }
+
+    public required RegisterWorkflowRequest Definition { get; init; }
 }
 
 public sealed class StartWorkflowInstanceRequest

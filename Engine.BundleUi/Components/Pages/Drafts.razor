@@ -1,0 +1,1840 @@
+@page "/drafts"
+@using System.Globalization
+@using System.Text.Json
+@using System.Text.Json.Nodes
+@using Engine.BundleUi.Models
+@using Engine.BundleUi.Services
+@inject BundleApiClient BundleApiClient
+
+<PageTitle>Recipe Drafts</PageTitle>
+
+<div class="drafts-shell">
+    <section class="hero">
+        <h1>Recipe Draft Studio</h1>
+        <p>Create, revise, validate, and publish workflow recipes using durable drafts.</p>
+    </section>
+
+    <section class="draft-grid">
+        <section class="panel draft-list-panel">
+            <div class="panel-header">
+                <h2>Drafts</h2>
+                <button class="btn-secondary" @onclick="RefreshDraftsAsync" disabled="@IsLoadingDrafts">Refresh</button>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(DraftsErrorMessage))
+            {
+                <div class="alert error">@DraftsErrorMessage</div>
+            }
+
+            <div class="actions compact">
+                <button class="btn-primary" @onclick="CreateNewDraft">New Draft</button>
+            </div>
+
+            @if (DraftItems.Count == 0)
+            {
+                <p class="empty-note">No drafts yet.</p>
+            }
+            else
+            {
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Version</th>
+                            <th>Updated</th>
+                            <th></th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var draft in DraftItems)
+                        {
+                            <tr class="@(SelectedDraftId == draft.DraftId ? "selected-row" : string.Empty)">
+                                <td>@draft.Name</td>
+                                <td>@draft.Version</td>
+                                <td>@draft.UpdatedAt.LocalDateTime</td>
+                                <td>
+                                    <button class="btn-secondary" @onclick="() => OpenDraftAsync(draft.DraftId)" disabled="@IsBusy">Open</button>
+                                </td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+
+        <section class="panel editor-panel">
+            <div class="panel-header">
+                <h2>@(SelectedDraftId.HasValue ? "Edit Draft" : "Create Draft")</h2>
+                @if (SelectedDraftId.HasValue)
+                {
+                    <span class="draft-id">@SelectedDraftId</span>
+                }
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(EditorErrorMessage))
+            {
+                <div class="alert error">@EditorErrorMessage</div>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(EditorSuccessMessage))
+            {
+                <div class="alert success">@EditorSuccessMessage</div>
+            }
+
+            <div class="field-row">
+                <label for="draft-name">Name</label>
+                <input id="draft-name" type="text" @bind="DraftName" disabled="@IsBusy" />
+            </div>
+
+            <div class="field-row-inline">
+                <div class="field-row">
+                    <label for="draft-version">Version</label>
+                    <input id="draft-version" type="number" min="1" @bind="DraftVersion" disabled="@IsBusy" />
+                </div>
+                <div class="field-row">
+                    <label for="draft-description">Description</label>
+                    <input id="draft-description" type="text" @bind="DraftDescription" disabled="@IsBusy" />
+                </div>
+            </div>
+
+            <div class="field-row">
+                <label for="draft-details">Details</label>
+                <textarea id="draft-details" class="json-input short" @bind="DraftDetails" disabled="@IsBusy"></textarea>
+            </div>
+
+            <div class="field-row">
+                <div class="field-row-header">
+                    <label>Input Fields</label>
+                    <button type="button" class="btn-secondary" @onclick="AddInputField" disabled="@IsBusy">Add Field</button>
+                </div>
+
+                <div class="input-fields-editor">
+                    @if (InputFields.Count == 0)
+                    {
+                        <p class="empty-note">No input fields yet.</p>
+                    }
+                    else
+                    {
+                        @for (var i = 0; i < InputFields.Count; i++)
+                        {
+                            var field = InputFields[i];
+                            <div class="field-editor-card" @key="field.RowId">
+                                <div class="field-editor-card-header">
+                                    <strong>@(string.IsNullOrWhiteSpace(field.Name) ? $"Field {i + 1}" : field.Name)</strong>
+                                    <button type="button" class="btn-danger btn-small" @onclick="() => RemoveInputField(field.RowId)" disabled="@IsBusy">Remove</button>
+                                </div>
+
+                                <div class="field-editor-grid">
+                                    <div class="field-row">
+                                        <label>Name</label>
+                                        <input type="text" @bind="field.Name" disabled="@IsBusy" />
+                                    </div>
+                                    <div class="field-row">
+                                        <label>Display Name</label>
+                                        <input type="text" @bind="field.DisplayName" disabled="@IsBusy" />
+                                    </div>
+                                    <div class="field-row">
+                                        <label>Type</label>
+                                        <select @bind="field.Type" disabled="@IsBusy">
+                                            <option value="string">string</option>
+                                            <option value="number">number</option>
+                                            <option value="boolean">boolean</option>
+                                            <option value="object">object</option>
+                                            <option value="array">array</option>
+                                        </select>
+                                    </div>
+                                    <div class="field-row field-row-checkboxes">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" @bind="field.Required" disabled="@IsBusy" />
+                                            <span>Required</span>
+                                        </label>
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" @bind="field.IsSecret" disabled="@(IsBusy || !field.Type.Equals("string", StringComparison.OrdinalIgnoreCase))" />
+                                            <span>Secret</span>
+                                        </label>
+                                    </div>
+                                    <div class="field-row">
+                                        <label>Description</label>
+                                        <input type="text" @bind="field.Description" disabled="@IsBusy" />
+                                    </div>
+                                    <div class="field-row">
+                                        <label>Placeholder</label>
+                                        <input type="text" @bind="field.Placeholder" disabled="@IsBusy" />
+                                    </div>
+                                    <div class="field-row">
+                                        <label>Default Value</label>
+                                        @if (field.Type.Equals("object", StringComparison.OrdinalIgnoreCase) || field.Type.Equals("array", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            <textarea class="json-input short" @bind="field.DefaultValueText" disabled="@IsBusy"></textarea>
+                                        }
+                                        else
+                                        {
+                                            <input type="text" @bind="field.DefaultValueText" disabled="@IsBusy" />
+                                        }
+                                    </div>
+                                    <div class="field-row">
+                                        <label>Options (comma or newline separated)</label>
+                                        <textarea class="json-input short" @bind="field.OptionsText" disabled="@(IsBusy || !field.Type.Equals("string", StringComparison.OrdinalIgnoreCase))"></textarea>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+
+            <div class="field-row">
+                <div class="field-row-header">
+                    <label>Steps</label>
+                    <div class="step-toolbar">
+                        <button type="button" class="btn-secondary" @onclick="AddStep" disabled="@IsBusy">Add Step</button>
+                        <button type="button" class="btn-secondary" @onclick="ExpandAllSteps" disabled="@IsBusy || StepEditors.Count == 0">Expand All</button>
+                        <button type="button" class="btn-secondary" @onclick="CollapseAllSteps" disabled="@IsBusy || StepEditors.Count == 0">Collapse All</button>
+                        <button type="button" class="btn-secondary" @onclick="ToggleAdvancedStepsJson" disabled="@IsBusy">
+                            @(ShowAdvancedStepJson ? "Hide JSON" : "Advanced JSON")
+                        </button>
+                    </div>
+                </div>
+
+                @if (StepEditors.Count > 0)
+                {
+                    var unknownDependencyCount = CountUnknownDependencies();
+                    var orderIssues = GetStepOrderIssues();
+                    <div class="validation-summary">
+                        <span class="summary-item">Steps: @StepEditors.Count</span>
+                        <span class="summary-item @(unknownDependencyCount == 0 ? "ok" : "warn")">
+                            Unknown deps: @unknownDependencyCount
+                        </span>
+                        <span class="summary-item @(orderIssues.Count == 0 ? "ok" : "warn")">
+                            Order issues: @orderIssues.Count
+                        </span>
+                    </div>
+                    @if (orderIssues.Count > 0)
+                    {
+                        <div class="alert error compact">
+                            @foreach (var issue in orderIssues)
+                            {
+                                <div>@issue</div>
+                            }
+                        </div>
+                    }
+                }
+
+                <div class="step-editor-list" @onmousemove="OnStepDragMove" @onmouseup="EndStepDrag" @onmouseleave="EndStepDrag">
+                    @if (StepEditors.Count == 0)
+                    {
+                        <p class="empty-note">No steps yet. Add at least one step before saving.</p>
+                    }
+                    else
+                    {
+                        @for (var i = 0; i < StepEditors.Count; i++)
+                        {
+                            var step = StepEditors[i];
+                            var dependsOn = GetStepDependencies(step);
+                            var unknownDependencies = GetUnknownStepDependencies(step);
+                            var isDragged = IsStepDragActive && DraggedStepRowId == step.RowId;
+                            <div class="step-drop-zone @(IsStepDragActive ? "visible" : string.Empty) @(DropInsertIndex == i ? "active" : string.Empty)"
+                                 @onmouseenter="() => OnDropZoneEnter(i)"
+                                 @onmouseup="EndStepDrag">
+                                <span></span>
+                            </div>
+                            <div class="step-editor-card @(isDragged ? "dragging" : string.Empty)"
+                                 @key="step.RowId"
+                                 style="@(isDragged ? GetDraggedStepStyle() : null)"
+                                 @onmouseenter="() => OnStepCardEnter(step.RowId)"
+                                 @onmouseup="EndStepDrag">
+                                <div class="step-editor-card-header">
+                                    <div class="step-header-main">
+                                        <button type="button"
+                                             class="drag-handle"
+                                             title="Drag to reorder step"
+                                             disabled="@IsBusy"
+                                             @onmousedown="(e) => StartStepDrag(step.RowId, e)"
+                                             @onmouseup="EndStepDrag">
+                                            <span aria-hidden="true" class="drag-dots">⋮⋮</span>
+                                        </button>
+                                        <div class="step-header-text">
+                                            <strong>@(string.IsNullOrWhiteSpace(step.StepId) ? $"Step {i + 1}" : step.StepId)</strong>
+                                            <p class="step-header-meta">
+                                                Activity: @(string.IsNullOrWhiteSpace(step.ActivityRef) ? "n/a" : step.ActivityRef)
+                                                @if (dependsOn.Count > 0)
+                                                {
+                                                    <span> | Depends on @string.Join(", ", dependsOn)</span>
+                                                }
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div class="step-card-actions">
+                                        <button type="button" class="btn-secondary btn-small" @onclick="() => ToggleStepExpanded(step.RowId)" disabled="@IsBusy">
+                                            @(step.IsExpanded ? "Collapse" : "Expand")
+                                        </button>
+                                        <button type="button" class="btn-danger btn-small" @onclick="() => RemoveStep(step.RowId)" disabled="@IsBusy">Remove</button>
+                                    </div>
+                                </div>
+
+                                @if (unknownDependencies.Count > 0)
+                                {
+                                    <p class="field-hint field-hint-warning">Unknown dependency references: @string.Join(", ", unknownDependencies)</p>
+                                }
+
+                                @if (step.IsExpanded)
+                                {
+                                    <div class="step-editor-grid">
+                                        <div class="field-row">
+                                            <label>Step Id</label>
+                                            <input type="text" @bind="step.StepId" disabled="@IsBusy" />
+                                        </div>
+                                        <div class="field-row">
+                                            <label>Display Name</label>
+                                            <input type="text" @bind="step.DisplayName" disabled="@IsBusy" />
+                                        </div>
+                                        <div class="field-row">
+                                            <label>Activity Ref</label>
+                                            <input type="text" @bind="step.ActivityRef" disabled="@IsBusy" />
+                                        </div>
+                                        <div class="field-row">
+                                            <label>Timeout Seconds</label>
+                                            <input type="text" @bind="step.TimeoutSecondsText" disabled="@IsBusy" />
+                                        </div>
+                                    </div>
+
+                                    <div class="field-row field-row-checkboxes">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" @bind="step.AbortOnFail" disabled="@IsBusy" />
+                                            <span>Abort Workflow On Fail</span>
+                                        </label>
+                                    </div>
+
+                                    <div class="subsection">
+                                        <div class="field-row-header">
+                                            <label>Inputs</label>
+                                            <button type="button" class="btn-secondary btn-small" @onclick="() => AddStepInput(step.RowId)" disabled="@IsBusy">Add Input</button>
+                                        </div>
+                                        <p class="field-hint">
+                                            Inputs define where step data comes from. Use <strong>Binding</strong> for references like <code>$.inputs.projectId</code> or <code>$.steps.CreateProject.outputs.projectNumber</code>.
+                                        </p>
+                                        @if (step.Inputs.Count == 0)
+                                        {
+                                            <p class="empty-note">No inputs configured.</p>
+                                        }
+                                        else
+                                        {
+                                            @for (var inputIndex = 0; inputIndex < step.Inputs.Count; inputIndex++)
+                                            {
+                                                var input = step.Inputs[inputIndex];
+                                                <div class="sub-card" @key="input.RowId">
+                                                    <div class="sub-card-grid">
+                                                        <div class="field-row">
+                                                            <label>Name</label>
+                                                            <input type="text" @bind="input.Name" disabled="@IsBusy" />
+                                                        </div>
+                                                        <div class="field-row">
+                                                            <label>Mode</label>
+                                                            <select @bind="input.Mode" disabled="@IsBusy">
+                                                                <option value="binding">Binding</option>
+                                                                <option value="string">Literal String</option>
+                                                                <option value="number">Literal Number</option>
+                                                                <option value="boolean">Literal Boolean</option>
+                                                                <option value="json">Literal Json</option>
+                                                                <option value="null">Literal Null</option>
+                                                            </select>
+                                                        </div>
+                                                        <div class="field-row">
+                                                            <label>Value</label>
+                                                            @if (input.Mode.Equals("binding", StringComparison.OrdinalIgnoreCase))
+                                                            {
+                                                                var bindingOptions = GetBindingOptions(step);
+                                                                <input list="@($"binding-options-{step.RowId:N}-{input.RowId:N}")" type="text" @bind="input.ValueText" disabled="@IsBusy" />
+                                                                <datalist id="@($"binding-options-{step.RowId:N}-{input.RowId:N}")">
+                                                                    @foreach (var option in bindingOptions)
+                                                                    {
+                                                                        <option value="@option"></option>
+                                                                    }
+                                                                </datalist>
+                                                            }
+                                                            else if (input.Mode.Equals("json", StringComparison.OrdinalIgnoreCase))
+                                                            {
+                                                                <textarea class="json-input short" @bind="input.ValueText" disabled="@(IsBusy || input.Mode.Equals("null", StringComparison.OrdinalIgnoreCase))"></textarea>
+                                                            }
+                                                            else
+                                                            {
+                                                                <input type="text" @bind="input.ValueText" disabled="@(IsBusy || input.Mode.Equals("null", StringComparison.OrdinalIgnoreCase))" />
+                                                            }
+                                                        </div>
+                                                    </div>
+                                                    @if (input.Mode.Equals("binding", StringComparison.OrdinalIgnoreCase))
+                                                    {
+                                                        <p class="field-hint field-hint-inline">Pick a known input/output reference or type a custom binding.</p>
+                                                    }
+                                                    <button type="button" class="btn-danger btn-small" @onclick="() => RemoveStepInput(step.RowId, input.RowId)" disabled="@IsBusy">Remove Input</button>
+                                                </div>
+                                            }
+                                        }
+                                    </div>
+
+                                    <div class="subsection">
+                                        <label>Output Keys (comma or newline separated)</label>
+                                        <textarea class="json-input short" @bind="step.OutputsText" disabled="@IsBusy"></textarea>
+                                    </div>
+
+                                    <div class="subsection">
+                                        <label>Retry Policy</label>
+                                        <div class="sub-card-grid retry-grid">
+                                            <div class="field-row">
+                                                <label>Max Attempts</label>
+                                                <input type="number" min="1" @bind="step.RetryMaxAttempts" disabled="@IsBusy" />
+                                            </div>
+                                            <div class="field-row">
+                                                <label>Initial Delay (sec)</label>
+                                                <input type="number" min="1" @bind="step.RetryInitialDelaySeconds" disabled="@IsBusy" />
+                                            </div>
+                                            <div class="field-row">
+                                                <label>Max Delay (sec)</label>
+                                                <input type="number" min="1" @bind="step.RetryMaxDelaySeconds" disabled="@IsBusy" />
+                                            </div>
+                                            <div class="field-row">
+                                                <label>Backoff Factor</label>
+                                                <input type="number" min="1" step="0.1" @bind="step.RetryBackoffFactor" disabled="@IsBusy" />
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="subsection">
+                                        <label>Wait For Event (optional)</label>
+                                        <div class="sub-card-grid">
+                                            <div class="field-row">
+                                                <label>Event Type</label>
+                                                <input type="text" @bind="step.WaitEventType" disabled="@IsBusy" />
+                                            </div>
+                                            <div class="field-row">
+                                                <label>Correlation Key Expression</label>
+                                                <input type="text" @bind="step.WaitCorrelationKeyExpression" disabled="@IsBusy" />
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="subsection">
+                                        <div class="field-row-header">
+                                            <label>Script Parameters (ordered)</label>
+                                            <button type="button" class="btn-secondary btn-small" @onclick="() => AddScriptParameter(step.RowId)" disabled="@IsBusy">Add Parameter</button>
+                                        </div>
+                                        @if (step.ScriptParameters.Count == 0)
+                                        {
+                                            <p class="empty-note">No ordered parameters configured.</p>
+                                        }
+                                        else
+                                        {
+                                            @for (var paramIndex = 0; paramIndex < step.ScriptParameters.Count; paramIndex++)
+                                            {
+                                                var parameter = step.ScriptParameters[paramIndex];
+                                                var parameterOptions = GetScriptParameterOptions(step, parameter);
+                                                <div class="sub-card sub-card-inline" @key="parameter.RowId">
+                                                    <div class="field-row">
+                                                        <label>Input Name</label>
+                                                        <select @bind="parameter.Name" disabled="@IsBusy">
+                                                            <option value="">Select input...</option>
+                                                            @foreach (var option in parameterOptions)
+                                                            {
+                                                                <option value="@option">@option</option>
+                                                            }
+                                                        </select>
+                                                    </div>
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" @bind="parameter.Required" disabled="@IsBusy" />
+                                                        <span>Required</span>
+                                                    </label>
+                                                    <button type="button" class="btn-danger btn-small" @onclick="() => RemoveScriptParameter(step.RowId, parameter.RowId)" disabled="@IsBusy">Remove</button>
+                                                </div>
+                                            }
+                                        }
+                                    </div>
+
+                                    <div class="subsection">
+                                        <div class="field-row-header">
+                                            <label>Safety Flags</label>
+                                            <button type="button" class="btn-secondary btn-small" @onclick="() => AddSafetyFlag(step.RowId)" disabled="@IsBusy">Add Flag</button>
+                                        </div>
+                                        @if (step.SafetyFlags.Count == 0)
+                                        {
+                                            <p class="empty-note">No safety flags configured.</p>
+                                        }
+                                        else
+                                        {
+                                            @for (var flagIndex = 0; flagIndex < step.SafetyFlags.Count; flagIndex++)
+                                            {
+                                                var flag = step.SafetyFlags[flagIndex];
+                                                <div class="sub-card sub-card-inline" @key="flag.RowId">
+                                                    <div class="field-row">
+                                                        <label>Flag Name</label>
+                                                        <input type="text" @bind="flag.Name" disabled="@IsBusy" />
+                                                    </div>
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" @bind="flag.Value" disabled="@IsBusy" />
+                                                        <span>Enabled</span>
+                                                    </label>
+                                                    <button type="button" class="btn-danger btn-small" @onclick="() => RemoveSafetyFlag(step.RowId, flag.RowId)" disabled="@IsBusy">Remove</button>
+                                                </div>
+                                            }
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                        <div class="step-drop-zone @(IsStepDragActive ? "visible" : string.Empty) @(DropInsertIndex == StepEditors.Count ? "active" : string.Empty)"
+                             @onmouseenter="() => OnDropZoneEnter(StepEditors.Count)"
+                             @onmouseup="EndStepDrag">
+                            <span></span>
+                        </div>
+                    }
+                </div>
+
+                @if (StepEditors.Count > 0)
+                {
+                    <div class="dependency-preview">
+                        <h3>Dependency Preview</h3>
+                        <div class="dependency-preview-list">
+                            @for (var i = 0; i < StepEditors.Count; i++)
+                            {
+                                var step = StepEditors[i];
+                                var displayId = string.IsNullOrWhiteSpace(step.StepId) ? $"Step {i + 1}" : step.StepId.Trim();
+                                var dependsOn = GetStepDependencies(step);
+                                <div class="dependency-preview-row">
+                                    <span class="dep-step">@displayId</span>
+                                    <span class="dep-arrow">←</span>
+                                    <span class="dep-input">
+                                        @(dependsOn.Count == 0 ? "No dependencies" : string.Join(", ", dependsOn))
+                                    </span>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+
+                @if (ShowAdvancedStepJson)
+                {
+                    <div class="advanced-json-panel">
+                        <div class="field-row-header">
+                            <label for="advanced-steps-json">Steps JSON (Power Mode)</label>
+                            <div class="step-toolbar">
+                                <button type="button" class="btn-secondary btn-small" @onclick="SyncAdvancedStepsFromEditor" disabled="@IsBusy">Refresh From Cards</button>
+                                <button type="button" class="btn-secondary btn-small" @onclick="ApplyAdvancedStepsToEditor" disabled="@IsBusy">Apply To Cards</button>
+                            </div>
+                        </div>
+                        <p class="field-hint">Use this for bulk edits. Click <strong>Apply To Cards</strong> to update the structured editor.</p>
+                        <textarea id="advanced-steps-json" class="json-input tall" @bind="AdvancedStepsJson" disabled="@IsBusy"></textarea>
+                    </div>
+                }
+            </div>
+
+            <div class="actions">
+                <button class="btn-primary" @onclick="SaveDraftAsync" disabled="@IsBusy">Save Draft</button>
+                @if (SelectedDraftId.HasValue)
+                {
+                    <button class="btn-accent" @onclick="PublishDraftAsync" disabled="@IsBusy">Publish Draft</button>
+                    <button class="btn-danger" @onclick="DeleteDraftAsync" disabled="@IsBusy">Delete Draft</button>
+                }
+            </div>
+        </section>
+    </section>
+</div>
+
+@code {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        WriteIndented = true,
+        PropertyNameCaseInsensitive = true
+    };
+
+    private IReadOnlyList<WorkflowDraftSummary> DraftItems { get; set; } = [];
+
+    private Guid? SelectedDraftId { get; set; }
+
+    private bool IsLoadingDrafts { get; set; }
+
+    private bool IsBusy { get; set; }
+
+    private string? DraftsErrorMessage { get; set; }
+
+    private string? EditorErrorMessage { get; set; }
+
+    private string? EditorSuccessMessage { get; set; }
+
+    private string DraftName { get; set; } = "new-recipe";
+
+    private int DraftVersion { get; set; } = 1;
+
+    private string DraftDescription { get; set; } = string.Empty;
+
+    private string DraftDetails { get; set; } = string.Empty;
+
+    private List<DraftInputFieldEditor> InputFields { get; set; } = [];
+
+    private List<DraftStepEditor> StepEditors { get; set; } = [];
+
+    private bool ShowAdvancedStepJson { get; set; }
+
+    private string AdvancedStepsJson { get; set; } = "[]";
+
+    private Guid? DraggedStepRowId { get; set; }
+
+    private int? DropInsertIndex { get; set; }
+
+    private bool IsStepDragActive { get; set; }
+
+    private double StepDragStartX { get; set; }
+
+    private double StepDragStartY { get; set; }
+
+    private double StepDragDeltaX { get; set; }
+
+    private double StepDragDeltaY { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshDraftsAsync();
+        CreateNewDraft();
+    }
+
+    private async Task RefreshDraftsAsync()
+    {
+        IsLoadingDrafts = true;
+        DraftsErrorMessage = null;
+
+        using var cancellationSource = new CancellationTokenSource();
+        try
+        {
+            var drafts = await BundleApiClient.GetWorkflowDraftsAsync(cancellationSource.Token);
+            DraftItems = drafts.OrderByDescending(x => x.UpdatedAt).ToList();
+        }
+        catch (Exception ex)
+        {
+            DraftsErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsLoadingDrafts = false;
+        }
+    }
+
+    private void CreateNewDraft()
+    {
+        SelectedDraftId = null;
+        DraftName = "new-recipe";
+        DraftVersion = 1;
+        DraftDescription = string.Empty;
+        DraftDetails = string.Empty;
+        InputFields = [];
+        StepEditors = [];
+        ShowAdvancedStepJson = false;
+        AdvancedStepsJson = "[]";
+        DraggedStepRowId = null;
+        DropInsertIndex = null;
+        IsStepDragActive = false;
+        StepDragDeltaX = 0;
+        StepDragDeltaY = 0;
+        EditorErrorMessage = null;
+        EditorSuccessMessage = null;
+    }
+
+    private async Task OpenDraftAsync(Guid draftId)
+    {
+        IsBusy = true;
+        EditorErrorMessage = null;
+
+        using var cancellationSource = new CancellationTokenSource();
+        try
+        {
+            var draft = await BundleApiClient.GetWorkflowDraftAsync(draftId, cancellationSource.Token);
+            SelectedDraftId = draft.DraftId;
+            DraftName = draft.Definition.Name;
+            DraftVersion = draft.Definition.Version;
+            DraftDescription = draft.Definition.Description ?? string.Empty;
+            DraftDetails = draft.Definition.Details ?? string.Empty;
+            LoadInputFields(draft.Definition.InputSchema);
+            LoadSteps(draft.Definition.Steps);
+            AdvancedStepsJson = JsonSerializer.Serialize(draft.Definition.Steps, JsonOptions);
+            EditorSuccessMessage = "Draft loaded.";
+        }
+        catch (Exception ex)
+        {
+            EditorErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task SaveDraftAsync()
+    {
+        IsBusy = true;
+        EditorErrorMessage = null;
+
+        using var cancellationSource = new CancellationTokenSource();
+        try
+        {
+            var definition = BuildDraftDefinition();
+            WorkflowDraftSummary summary;
+            if (SelectedDraftId.HasValue)
+            {
+                summary = await BundleApiClient.UpdateWorkflowDraftAsync(SelectedDraftId.Value, definition, cancellationSource.Token);
+            }
+            else
+            {
+                summary = await BundleApiClient.CreateWorkflowDraftAsync(definition, cancellationSource.Token);
+                SelectedDraftId = summary.DraftId;
+            }
+
+            await RefreshDraftsAsync();
+            EditorSuccessMessage = $"Draft saved ({summary.Name} v{summary.Version}).";
+        }
+        catch (Exception ex)
+        {
+            EditorErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task PublishDraftAsync()
+    {
+        if (!SelectedDraftId.HasValue)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        EditorErrorMessage = null;
+
+        using var cancellationSource = new CancellationTokenSource();
+        try
+        {
+            var result = await BundleApiClient.PublishWorkflowDraftAsync(SelectedDraftId.Value, cancellationSource.Token);
+            await RefreshDraftsAsync();
+            EditorSuccessMessage = $"Published {result.Name} v{result.Version} (r{result.Revision}).";
+        }
+        catch (Exception ex)
+        {
+            EditorErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task DeleteDraftAsync()
+    {
+        if (!SelectedDraftId.HasValue)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        EditorErrorMessage = null;
+
+        using var cancellationSource = new CancellationTokenSource();
+        try
+        {
+            await BundleApiClient.DeleteWorkflowDraftAsync(SelectedDraftId.Value, cancellationSource.Token);
+            await RefreshDraftsAsync();
+            CreateNewDraft();
+            EditorSuccessMessage = "Draft deleted.";
+        }
+        catch (Exception ex)
+        {
+            EditorErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private WorkflowDraftDefinition BuildDraftDefinition()
+    {
+        var inputSchema = BuildInputSchema();
+        var steps = ResolveStepsForSave(inputSchema);
+
+        return new WorkflowDraftDefinition(
+            DraftName.Trim(),
+            DraftVersion,
+            string.IsNullOrWhiteSpace(DraftDescription) ? null : DraftDescription.Trim(),
+            string.IsNullOrWhiteSpace(DraftDetails) ? null : DraftDetails.Trim(),
+            inputSchema,
+            steps);
+    }
+
+    private void AddInputField()
+    {
+        InputFields.Add(new DraftInputFieldEditor());
+    }
+
+    private void RemoveInputField(Guid rowId)
+    {
+        InputFields.RemoveAll(x => x.RowId == rowId);
+    }
+
+    private void LoadInputFields(WorkflowInputSchema inputSchema)
+    {
+        InputFields = inputSchema.Fields
+            .Select(field => new DraftInputFieldEditor
+            {
+                Name = field.Name,
+                DisplayName = field.DisplayName ?? string.Empty,
+                Type = NormalizeInputType(field.Type),
+                Required = field.Required,
+                Description = field.Description ?? string.Empty,
+                Placeholder = field.Placeholder ?? string.Empty,
+                DefaultValueText = field.DefaultValue?.ToJsonString(new JsonSerializerOptions(JsonSerializerDefaults.Web)
+                {
+                    WriteIndented = false
+                }) ?? string.Empty,
+                IsSecret = field.IsSecret,
+                OptionsText = string.Join(Environment.NewLine, field.Options)
+            })
+            .ToList();
+    }
+
+    private WorkflowInputSchema BuildInputSchema()
+    {
+        var normalizedFields = new List<WorkflowInputField>(InputFields.Count);
+        for (var i = 0; i < InputFields.Count; i++)
+        {
+            var field = InputFields[i];
+            var name = field.Name.Trim();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                throw new InvalidOperationException($"Input field {i + 1} is missing a name.");
+            }
+
+            var type = NormalizeInputType(field.Type);
+            var defaultValue = ParseDefaultValue(field.DefaultValueText, type, name);
+            var options = type.Equals("string", StringComparison.OrdinalIgnoreCase)
+                ? ParseOptions(field.OptionsText)
+                : [];
+
+            normalizedFields.Add(new WorkflowInputField(
+                name,
+                string.IsNullOrWhiteSpace(field.DisplayName) ? null : field.DisplayName.Trim(),
+                type,
+                field.Required,
+                string.IsNullOrWhiteSpace(field.Description) ? null : field.Description.Trim(),
+                string.IsNullOrWhiteSpace(field.Placeholder) ? null : field.Placeholder.Trim(),
+                defaultValue,
+                type.Equals("string", StringComparison.OrdinalIgnoreCase) && field.IsSecret,
+                options));
+        }
+
+        return new WorkflowInputSchema(normalizedFields);
+    }
+
+    private static string NormalizeInputType(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "string";
+        }
+
+        var normalized = value.Trim().ToLowerInvariant();
+        return normalized is "string" or "number" or "boolean" or "object" or "array" ? normalized : "string";
+    }
+
+    private static JsonNode? ParseDefaultValue(string? text, string type, string fieldName)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        var trimmed = text.Trim();
+        return type switch
+        {
+            "string" => JsonValue.Create(trimmed),
+            "number" => ParseNumberDefault(trimmed, fieldName),
+            "boolean" => ParseBooleanDefault(trimmed, fieldName),
+            "object" or "array" => ParseJsonDefault(trimmed, type, fieldName),
+            _ => null
+        };
+    }
+
+    private static JsonNode ParseNumberDefault(string value, string fieldName)
+    {
+        if (decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number))
+        {
+            return JsonValue.Create(number)!;
+        }
+
+        throw new InvalidOperationException(
+            $"Input field '{fieldName}' default value must be a valid number (use invariant format like 12 or 12.34).");
+    }
+
+    private static JsonNode ParseBooleanDefault(string value, string fieldName)
+    {
+        if (bool.TryParse(value, out var parsed))
+        {
+            return JsonValue.Create(parsed)!;
+        }
+
+        throw new InvalidOperationException($"Input field '{fieldName}' default value must be 'true' or 'false'.");
+    }
+
+    private static JsonNode ParseJsonDefault(string value, string type, string fieldName)
+    {
+        JsonNode? parsed;
+        try
+        {
+            parsed = JsonNode.Parse(value);
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException($"Input field '{fieldName}' default value must be valid JSON.", ex);
+        }
+
+        if (parsed is null)
+        {
+            throw new InvalidOperationException($"Input field '{fieldName}' default value cannot be null.");
+        }
+
+        var expectedKind = type == "object" ? JsonValueKind.Object : JsonValueKind.Array;
+        if (parsed.GetValueKind() != expectedKind)
+        {
+            throw new InvalidOperationException(
+                $"Input field '{fieldName}' default value must be a JSON {type}.");
+        }
+
+        return parsed;
+    }
+
+    private static IReadOnlyList<string> ParseOptions(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return [];
+        }
+
+        return text
+            .Split([',', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private IReadOnlyList<string> GetScriptParameterOptions(DraftStepEditor step, DraftScriptParameterEditor parameter)
+    {
+        var options = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var inputField in InputFields)
+        {
+            if (!string.IsNullOrWhiteSpace(inputField.Name))
+            {
+                options.Add(inputField.Name.Trim());
+            }
+        }
+
+        foreach (var stepInput in step.Inputs)
+        {
+            if (!string.IsNullOrWhiteSpace(stepInput.Name))
+            {
+                options.Add(stepInput.Name.Trim());
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(parameter.Name))
+        {
+            options.Add(parameter.Name.Trim());
+        }
+
+        return options.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private IReadOnlyList<string> GetBindingOptions(DraftStepEditor currentStep)
+    {
+        var options = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var inputField in InputFields)
+        {
+            if (!string.IsNullOrWhiteSpace(inputField.Name))
+            {
+                options.Add($"$.inputs.{inputField.Name.Trim()}");
+            }
+        }
+
+        foreach (var step in StepEditors)
+        {
+            var stepId = step.StepId.Trim();
+            if (string.IsNullOrWhiteSpace(stepId))
+            {
+                continue;
+            }
+
+            if (step.RowId == currentStep.RowId)
+            {
+                continue;
+            }
+
+            foreach (var outputKey in ParseKeyList(step.OutputsText))
+            {
+                options.Add($"$.steps.{stepId}.outputs.{outputKey}");
+            }
+        }
+
+        return options.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private void AddStep()
+    {
+        StepEditors.Add(new DraftStepEditor { IsExpanded = true });
+        if (!ShowAdvancedStepJson)
+        {
+            return;
+        }
+
+        SyncAdvancedStepsFromEditor();
+    }
+
+    private void ExpandAllSteps()
+    {
+        foreach (var step in StepEditors)
+        {
+            step.IsExpanded = true;
+        }
+    }
+
+    private void CollapseAllSteps()
+    {
+        foreach (var step in StepEditors)
+        {
+            step.IsExpanded = false;
+        }
+    }
+
+    private void RemoveStep(Guid rowId)
+    {
+        StepEditors.RemoveAll(x => x.RowId == rowId);
+        if (!ShowAdvancedStepJson)
+        {
+            return;
+        }
+
+        SyncAdvancedStepsFromEditor();
+    }
+
+    private void ToggleStepExpanded(Guid rowId)
+    {
+        var step = StepEditors.FirstOrDefault(x => x.RowId == rowId);
+        if (step is null)
+        {
+            return;
+        }
+
+        step.IsExpanded = !step.IsExpanded;
+    }
+
+    private void StartStepDrag(Guid rowId, Microsoft.AspNetCore.Components.Web.MouseEventArgs e)
+    {
+        if (IsBusy)
+        {
+            return;
+        }
+
+        var currentIndex = StepEditors.FindIndex(x => x.RowId == rowId);
+        if (currentIndex < 0)
+        {
+            return;
+        }
+
+        IsStepDragActive = true;
+        EditorErrorMessage = null;
+        DraggedStepRowId = rowId;
+        DropInsertIndex = currentIndex;
+        StepDragStartX = e.ClientX;
+        StepDragStartY = e.ClientY;
+        StepDragDeltaX = 0;
+        StepDragDeltaY = 0;
+    }
+
+    private void OnStepDragMove(Microsoft.AspNetCore.Components.Web.MouseEventArgs e)
+    {
+        if (!IsStepDragActive || !DraggedStepRowId.HasValue)
+        {
+            return;
+        }
+
+        StepDragDeltaX = e.ClientX - StepDragStartX;
+        StepDragDeltaY = e.ClientY - StepDragStartY;
+    }
+
+    private void OnDropZoneEnter(int index)
+    {
+        if (!IsStepDragActive || !DraggedStepRowId.HasValue)
+        {
+            return;
+        }
+
+        DropInsertIndex = index;
+    }
+
+    private void OnStepCardEnter(Guid targetRowId)
+    {
+        if (!IsStepDragActive || !DraggedStepRowId.HasValue || DraggedStepRowId == targetRowId)
+        {
+            return;
+        }
+
+        var draggedIndex = StepEditors.FindIndex(x => x.RowId == DraggedStepRowId.Value);
+        var targetIndex = StepEditors.FindIndex(x => x.RowId == targetRowId);
+        if (draggedIndex < 0 || targetIndex < 0)
+        {
+            return;
+        }
+
+        DropInsertIndex = targetIndex <= draggedIndex
+            ? targetIndex
+            : targetIndex + 1;
+    }
+
+    private void EndStepDrag()
+    {
+        if (IsStepDragActive
+            && DraggedStepRowId.HasValue
+            && DropInsertIndex.HasValue)
+        {
+            ReorderStepToIndex(DraggedStepRowId.Value, DropInsertIndex.Value);
+        }
+
+        IsStepDragActive = false;
+        DraggedStepRowId = null;
+        DropInsertIndex = null;
+        StepDragDeltaX = 0;
+        StepDragDeltaY = 0;
+    }
+
+    private string GetDraggedStepStyle()
+    {
+        return $"transform: translate({StepDragDeltaX.ToString(CultureInfo.InvariantCulture)}px, {StepDragDeltaY.ToString(CultureInfo.InvariantCulture)}px) scale(1.015);";
+    }
+
+    private void ReorderStepToIndex(Guid draggedRowId, int insertIndex)
+    {
+        var fromIndex = StepEditors.FindIndex(x => x.RowId == draggedRowId);
+        if (fromIndex < 0)
+        {
+            return;
+        }
+
+        var toIndex = Math.Clamp(insertIndex, 0, StepEditors.Count);
+        var step = StepEditors[fromIndex];
+        StepEditors.RemoveAt(fromIndex);
+        if (fromIndex < toIndex)
+        {
+            toIndex--;
+        }
+
+        var reordered = StepEditors.ToList();
+        reordered.Insert(toIndex, step);
+
+        if (!TryValidateStepOrdering(reordered, out var errorMessage))
+        {
+            EditorErrorMessage = errorMessage;
+            return;
+        }
+
+        StepEditors = reordered;
+        EditorErrorMessage = null;
+        if (ShowAdvancedStepJson)
+        {
+            SyncAdvancedStepsFromEditor();
+        }
+    }
+
+    private void ToggleAdvancedStepsJson()
+    {
+        ShowAdvancedStepJson = !ShowAdvancedStepJson;
+        if (ShowAdvancedStepJson)
+        {
+            SyncAdvancedStepsFromEditor();
+        }
+    }
+
+    private void SyncAdvancedStepsFromEditor()
+    {
+        try
+        {
+            var inputSchema = BuildInputSchema();
+            var steps = BuildSteps(inputSchema);
+            AdvancedStepsJson = JsonSerializer.Serialize(steps, JsonOptions);
+        }
+        catch (Exception ex)
+        {
+            EditorErrorMessage = ex.Message;
+        }
+    }
+
+    private void ApplyAdvancedStepsToEditor()
+    {
+        try
+        {
+            var steps = ParseAdvancedStepsJson();
+            LoadSteps(steps);
+            EditorErrorMessage = null;
+            EditorSuccessMessage = "Step cards updated from JSON.";
+        }
+        catch (Exception ex)
+        {
+            EditorErrorMessage = ex.Message;
+        }
+    }
+
+    private IReadOnlyList<WorkflowStepDraftDefinition> ResolveStepsForSave(WorkflowInputSchema inputSchema)
+    {
+        if (!ShowAdvancedStepJson)
+        {
+            return BuildSteps(inputSchema);
+        }
+
+        var parsed = ParseAdvancedStepsJson();
+        LoadSteps(parsed);
+        return BuildSteps(inputSchema);
+    }
+
+    private IReadOnlyList<WorkflowStepDraftDefinition> ParseAdvancedStepsJson()
+    {
+        var steps = JsonSerializer.Deserialize<IReadOnlyList<WorkflowStepDraftDefinition>>(AdvancedStepsJson, JsonOptions)
+                    ?? [];
+        return steps;
+    }
+
+    private static bool TryValidateStepOrdering(IReadOnlyList<DraftStepEditor> steps, out string errorMessage)
+    {
+        errorMessage = string.Empty;
+
+        var stepIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < steps.Count; i++)
+        {
+            var stepId = steps[i].StepId.Trim();
+            if (string.IsNullOrWhiteSpace(stepId))
+            {
+                continue;
+            }
+
+            // Duplicate step IDs are handled by save-time validation.
+            if (!stepIndex.ContainsKey(stepId))
+            {
+                stepIndex[stepId] = i;
+            }
+        }
+
+        for (var i = 0; i < steps.Count; i++)
+        {
+            var step = steps[i];
+            var stepId = step.StepId.Trim();
+            if (string.IsNullOrWhiteSpace(stepId))
+            {
+                continue;
+            }
+
+            foreach (var input in step.Inputs)
+            {
+                if (!input.Mode.Equals("binding", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (!TryParseStepOutputBinding(input.ValueText, out var dependencyStepId, out _))
+                {
+                    continue;
+                }
+
+                if (!stepIndex.TryGetValue(dependencyStepId, out var dependencyIndex))
+                {
+                    continue;
+                }
+
+                if (dependencyIndex < i)
+                {
+                    continue;
+                }
+
+                errorMessage =
+                    $"Invalid order: step '{stepId}' depends on '{dependencyStepId}' and must stay after it.";
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private int CountUnknownDependencies()
+    {
+        return StepEditors.Sum(step => GetUnknownStepDependencies(step).Count);
+    }
+
+    private IReadOnlyList<string> GetStepOrderIssues()
+    {
+        var issues = new List<string>();
+        var stepIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < StepEditors.Count; i++)
+        {
+            var id = StepEditors[i].StepId.Trim();
+            if (string.IsNullOrWhiteSpace(id) || stepIndex.ContainsKey(id))
+            {
+                continue;
+            }
+
+            stepIndex[id] = i;
+        }
+
+        for (var i = 0; i < StepEditors.Count; i++)
+        {
+            var step = StepEditors[i];
+            var stepId = step.StepId.Trim();
+            if (string.IsNullOrWhiteSpace(stepId))
+            {
+                continue;
+            }
+
+            foreach (var dependency in GetStepDependencies(step))
+            {
+                if (!stepIndex.TryGetValue(dependency, out var dependencyIndex))
+                {
+                    continue;
+                }
+
+                if (dependencyIndex < i)
+                {
+                    continue;
+                }
+
+                issues.Add($"'{stepId}' must remain after '{dependency}'.");
+            }
+        }
+
+        return issues.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private void AddStepInput(Guid stepRowId)
+    {
+        var step = StepEditors.FirstOrDefault(x => x.RowId == stepRowId);
+        step?.Inputs.Add(new DraftStepInputEditor());
+    }
+
+    private void RemoveStepInput(Guid stepRowId, Guid inputRowId)
+    {
+        var step = StepEditors.FirstOrDefault(x => x.RowId == stepRowId);
+        step?.Inputs.RemoveAll(x => x.RowId == inputRowId);
+    }
+
+    private void AddScriptParameter(Guid stepRowId)
+    {
+        var step = StepEditors.FirstOrDefault(x => x.RowId == stepRowId);
+        step?.ScriptParameters.Add(new DraftScriptParameterEditor());
+    }
+
+    private void RemoveScriptParameter(Guid stepRowId, Guid parameterRowId)
+    {
+        var step = StepEditors.FirstOrDefault(x => x.RowId == stepRowId);
+        step?.ScriptParameters.RemoveAll(x => x.RowId == parameterRowId);
+    }
+
+    private void AddSafetyFlag(Guid stepRowId)
+    {
+        var step = StepEditors.FirstOrDefault(x => x.RowId == stepRowId);
+        step?.SafetyFlags.Add(new DraftSafetyFlagEditor());
+    }
+
+    private void RemoveSafetyFlag(Guid stepRowId, Guid flagRowId)
+    {
+        var step = StepEditors.FirstOrDefault(x => x.RowId == stepRowId);
+        step?.SafetyFlags.RemoveAll(x => x.RowId == flagRowId);
+    }
+
+    private void LoadSteps(IReadOnlyList<WorkflowStepDraftDefinition> steps)
+    {
+        StepEditors = steps.Select(step =>
+        {
+            var editor = new DraftStepEditor
+            {
+                IsExpanded = false,
+                StepId = step.StepId,
+                DisplayName = step.DisplayName,
+                ActivityRef = step.ActivityRef,
+                TimeoutSecondsText = step.TimeoutSeconds?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+                RetryMaxAttempts = step.RetryPolicy.MaxAttempts,
+                RetryInitialDelaySeconds = step.RetryPolicy.InitialDelaySeconds,
+                RetryMaxDelaySeconds = step.RetryPolicy.MaxDelaySeconds,
+                RetryBackoffFactor = step.RetryPolicy.BackoffFactor,
+                WaitEventType = step.WaitForEvent?.EventType ?? string.Empty,
+                WaitCorrelationKeyExpression = step.WaitForEvent?.CorrelationKeyExpression ?? string.Empty,
+                AbortOnFail = step.AbortOnFail,
+                OutputsText = string.Join(Environment.NewLine, step.OutputsSchema)
+            };
+
+            editor.Inputs = step.Inputs.Select(pair => new DraftStepInputEditor
+            {
+                Name = pair.Key,
+                Mode = GetInputMode(pair.Value),
+                ValueText = GetInputValueText(pair.Value)
+            }).ToList();
+
+            editor.ScriptParameters = step.ScriptParameters
+                .Select(p => new DraftScriptParameterEditor { Name = p.Name, Required = p.Required })
+                .ToList();
+
+            editor.SafetyFlags = step.SafetyMetadata
+                .Select(p => new DraftSafetyFlagEditor { Name = p.Key, Value = p.Value })
+                .ToList();
+
+            return editor;
+        }).ToList();
+    }
+
+    private IReadOnlyList<WorkflowStepDraftDefinition> BuildSteps(WorkflowInputSchema inputSchema)
+    {
+        var workflowInputNames = new HashSet<string>(
+            inputSchema.Fields.Select(x => x.Name),
+            StringComparer.OrdinalIgnoreCase);
+
+        var steps = new List<WorkflowStepDraftDefinition>(StepEditors.Count);
+        for (var i = 0; i < StepEditors.Count; i++)
+        {
+            var step = StepEditors[i];
+            var stepId = step.StepId.Trim();
+            if (string.IsNullOrWhiteSpace(stepId))
+            {
+                throw new InvalidOperationException($"Step {i + 1} is missing StepId.");
+            }
+
+            var displayName = string.IsNullOrWhiteSpace(step.DisplayName) ? stepId : step.DisplayName.Trim();
+            var timeout = ParseOptionalPositiveInt(step.TimeoutSecondsText, $"Step '{stepId}' timeout");
+            var waitForEvent = BuildWaitForEvent(step, stepId);
+            var inputs = BuildStepInputs(step, stepId);
+            var scriptParameters = BuildScriptParameters(step, stepId);
+            ApplyScriptParameterInputBindings(stepId, inputs, scriptParameters, workflowInputNames);
+            var safetyFlags = BuildSafetyFlags(step);
+            var outputKeys = ParseKeyList(step.OutputsText);
+
+            steps.Add(new WorkflowStepDraftDefinition(
+                stepId,
+                displayName,
+                step.ActivityRef.Trim(),
+                inputs,
+                outputKeys,
+                new RetryPolicyDraftDefinition(
+                    step.RetryMaxAttempts,
+                    step.RetryInitialDelaySeconds,
+                    step.RetryMaxDelaySeconds,
+                    step.RetryBackoffFactor),
+                timeout,
+                waitForEvent,
+                scriptParameters,
+                step.AbortOnFail,
+                safetyFlags));
+        }
+
+        return steps;
+    }
+
+    private static void ApplyScriptParameterInputBindings(
+        string stepId,
+        Dictionary<string, WorkflowInputBindingValue> inputs,
+        IReadOnlyList<ScriptParameterDraftDefinition> scriptParameters,
+        HashSet<string> workflowInputNames)
+    {
+        foreach (var parameter in scriptParameters)
+        {
+            if (inputs.ContainsKey(parameter.Name))
+            {
+                continue;
+            }
+
+            if (workflowInputNames.Contains(parameter.Name))
+            {
+                inputs[parameter.Name] = new WorkflowInputBindingValue($"$.inputs.{parameter.Name}", null);
+                continue;
+            }
+
+            throw new InvalidOperationException(
+                $"Step '{stepId}' script parameter '{parameter.Name}' must match a Step Input key, or a Workflow Input field with the same name.");
+        }
+    }
+
+    private static Dictionary<string, WorkflowInputBindingValue> BuildStepInputs(DraftStepEditor step, string stepId)
+    {
+        var inputs = new Dictionary<string, WorkflowInputBindingValue>(StringComparer.OrdinalIgnoreCase);
+        foreach (var input in step.Inputs)
+        {
+            var name = input.Name.Trim();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                throw new InvalidOperationException($"Step '{stepId}' has an input with no name.");
+            }
+
+            if (input.Mode.Equals("binding", StringComparison.OrdinalIgnoreCase))
+            {
+                var binding = input.ValueText.Trim();
+                if (string.IsNullOrWhiteSpace(binding))
+                {
+                    throw new InvalidOperationException($"Step '{stepId}' input '{name}' is missing its binding value.");
+                }
+
+                inputs[name] = new WorkflowInputBindingValue(binding, null);
+                continue;
+            }
+
+            inputs[name] = new WorkflowInputBindingValue(null, ParseInputLiteral(input, stepId, name));
+        }
+
+        return inputs;
+    }
+
+    private static IReadOnlyList<ScriptParameterDraftDefinition> BuildScriptParameters(DraftStepEditor step, string stepId)
+    {
+        return step.ScriptParameters
+            .Select(parameter =>
+            {
+                var name = parameter.Name.Trim();
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    throw new InvalidOperationException($"Step '{stepId}' has a script parameter with no name.");
+                }
+
+                return new ScriptParameterDraftDefinition(name, parameter.Required);
+            })
+            .ToList();
+    }
+
+    private static Dictionary<string, bool> BuildSafetyFlags(DraftStepEditor step)
+    {
+        var safety = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        foreach (var flag in step.SafetyFlags)
+        {
+            var name = flag.Name.Trim();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            safety[name] = flag.Value;
+        }
+
+        return safety;
+    }
+
+    private static WaitForEventDraftDefinition? BuildWaitForEvent(DraftStepEditor step, string stepId)
+    {
+        var eventType = step.WaitEventType.Trim();
+        var correlation = step.WaitCorrelationKeyExpression.Trim();
+        if (string.IsNullOrWhiteSpace(eventType) && string.IsNullOrWhiteSpace(correlation))
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(eventType) || string.IsNullOrWhiteSpace(correlation))
+        {
+            throw new InvalidOperationException(
+                $"Step '{stepId}' wait-for-event must include both Event Type and Correlation Key Expression.");
+        }
+
+        return new WaitForEventDraftDefinition(eventType, correlation);
+    }
+
+    private static int? ParseOptionalPositiveInt(string? value, string label)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        if (int.TryParse(value.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) && parsed > 0)
+        {
+            return parsed;
+        }
+
+        throw new InvalidOperationException($"{label} must be a positive integer.");
+    }
+
+    private static IReadOnlyList<string> ParseKeyList(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return [];
+        }
+
+        return text
+            .Split([',', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private IReadOnlyList<string> GetStepDependencies(DraftStepEditor step)
+    {
+        var dependencies = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var input in step.Inputs)
+        {
+            if (!input.Mode.Equals("binding", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (TryParseStepOutputBinding(input.ValueText, out var sourceStepId, out _))
+            {
+                dependencies.Add(sourceStepId);
+            }
+        }
+
+        return dependencies.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private IReadOnlyList<string> GetUnknownStepDependencies(DraftStepEditor step)
+    {
+        var knownStepIds = StepEditors
+            .Where(x => x.RowId != step.RowId && !string.IsNullOrWhiteSpace(x.StepId))
+            .Select(x => x.StepId.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var missing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var input in step.Inputs)
+        {
+            if (!input.Mode.Equals("binding", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (TryParseStepOutputBinding(input.ValueText, out var sourceStepId, out _) && !knownStepIds.Contains(sourceStepId))
+            {
+                missing.Add(sourceStepId);
+            }
+        }
+
+        return missing.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static bool TryParseStepOutputBinding(string? binding, out string stepId, out string outputKey)
+    {
+        stepId = string.Empty;
+        outputKey = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(binding))
+        {
+            return false;
+        }
+
+        const string prefix = "$.steps.";
+        var text = binding.Trim();
+        if (!text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var remainder = text[prefix.Length..];
+        var outputMarkerIndex = remainder.IndexOf(".outputs.", StringComparison.OrdinalIgnoreCase);
+        if (outputMarkerIndex <= 0)
+        {
+            return false;
+        }
+
+        var parsedStepId = remainder[..outputMarkerIndex].Trim();
+        var parsedOutputKey = remainder[(outputMarkerIndex + ".outputs.".Length)..].Trim();
+        if (string.IsNullOrWhiteSpace(parsedStepId) || string.IsNullOrWhiteSpace(parsedOutputKey))
+        {
+            return false;
+        }
+
+        stepId = parsedStepId;
+        outputKey = parsedOutputKey;
+        return true;
+    }
+
+    private static string GetInputMode(WorkflowInputBindingValue value)
+    {
+        if (!string.IsNullOrWhiteSpace(value.Binding))
+        {
+            return "binding";
+        }
+
+        if (value.Literal is null)
+        {
+            return "null";
+        }
+
+        return value.Literal.GetValueKind() switch
+        {
+            JsonValueKind.String => "string",
+            JsonValueKind.Number => "number",
+            JsonValueKind.True or JsonValueKind.False => "boolean",
+            JsonValueKind.Object or JsonValueKind.Array => "json",
+            _ => "null"
+        };
+    }
+
+    private static string GetInputValueText(WorkflowInputBindingValue value)
+    {
+        if (!string.IsNullOrWhiteSpace(value.Binding))
+        {
+            return value.Binding;
+        }
+
+        if (value.Literal is null)
+        {
+            return string.Empty;
+        }
+
+        return value.Literal.GetValueKind() switch
+        {
+            JsonValueKind.String => value.Literal.ToString(),
+            JsonValueKind.True => bool.TrueString.ToLowerInvariant(),
+            JsonValueKind.False => bool.FalseString.ToLowerInvariant(),
+            JsonValueKind.Number => value.Literal.ToJsonString(),
+            JsonValueKind.Object or JsonValueKind.Array => value.Literal.ToJsonString(new JsonSerializerOptions(JsonSerializerDefaults.Web)
+            {
+                WriteIndented = true
+            }),
+            _ => string.Empty
+        };
+    }
+
+    private static JsonNode? ParseInputLiteral(DraftStepInputEditor input, string stepId, string inputName)
+    {
+        var mode = input.Mode.Trim().ToLowerInvariant();
+        var value = input.ValueText?.Trim() ?? string.Empty;
+
+        return mode switch
+        {
+            "string" => JsonValue.Create(value),
+            "number" => ParseInputLiteralNumber(value, stepId, inputName),
+            "boolean" => ParseInputLiteralBoolean(value, stepId, inputName),
+            "json" => ParseInputLiteralJson(value, stepId, inputName),
+            "null" => null,
+            _ => throw new InvalidOperationException($"Step '{stepId}' input '{inputName}' has unsupported mode '{input.Mode}'.")
+        };
+    }
+
+    private static JsonNode ParseInputLiteralNumber(string value, string stepId, string inputName)
+    {
+        if (decimal.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number))
+        {
+            return JsonValue.Create(number)!;
+        }
+
+        throw new InvalidOperationException($"Step '{stepId}' input '{inputName}' must be a valid number.");
+    }
+
+    private static JsonNode ParseInputLiteralBoolean(string value, string stepId, string inputName)
+    {
+        if (bool.TryParse(value, out var boolean))
+        {
+            return JsonValue.Create(boolean)!;
+        }
+
+        throw new InvalidOperationException($"Step '{stepId}' input '{inputName}' must be 'true' or 'false'.");
+    }
+
+    private static JsonNode ParseInputLiteralJson(string value, string stepId, string inputName)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new InvalidOperationException($"Step '{stepId}' input '{inputName}' JSON literal is empty.");
+        }
+
+        try
+        {
+            return JsonNode.Parse(value) ?? throw new InvalidOperationException($"Step '{stepId}' input '{inputName}' JSON literal cannot be null.");
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException($"Step '{stepId}' input '{inputName}' must contain valid JSON.", ex);
+        }
+    }
+
+    private sealed class DraftInputFieldEditor
+    {
+        public Guid RowId { get; init; } = Guid.NewGuid();
+
+        public string Name { get; set; } = string.Empty;
+
+        public string DisplayName { get; set; } = string.Empty;
+
+        public string Type { get; set; } = "string";
+
+        public bool Required { get; set; } = true;
+
+        public string Description { get; set; } = string.Empty;
+
+        public string Placeholder { get; set; } = string.Empty;
+
+        public string DefaultValueText { get; set; } = string.Empty;
+
+        public bool IsSecret { get; set; }
+
+        public string OptionsText { get; set; } = string.Empty;
+    }
+
+    private sealed class DraftStepEditor
+    {
+        public Guid RowId { get; init; } = Guid.NewGuid();
+
+        public bool IsExpanded { get; set; } = true;
+
+        public string StepId { get; set; } = string.Empty;
+
+        public string DisplayName { get; set; } = string.Empty;
+
+        public string ActivityRef { get; set; } = string.Empty;
+
+        public string TimeoutSecondsText { get; set; } = string.Empty;
+
+        public int RetryMaxAttempts { get; set; } = 3;
+
+        public int RetryInitialDelaySeconds { get; set; } = 5;
+
+        public int RetryMaxDelaySeconds { get; set; } = 300;
+
+        public double RetryBackoffFactor { get; set; } = 2;
+
+        public string WaitEventType { get; set; } = string.Empty;
+
+        public string WaitCorrelationKeyExpression { get; set; } = string.Empty;
+
+        public bool AbortOnFail { get; set; } = true;
+
+        public string OutputsText { get; set; } = string.Empty;
+
+        public List<DraftStepInputEditor> Inputs { get; set; } = [];
+
+        public List<DraftScriptParameterEditor> ScriptParameters { get; set; } = [];
+
+        public List<DraftSafetyFlagEditor> SafetyFlags { get; set; } = [];
+    }
+
+    private sealed class DraftStepInputEditor
+    {
+        public Guid RowId { get; init; } = Guid.NewGuid();
+
+        public string Name { get; set; } = string.Empty;
+
+        public string Mode { get; set; } = "binding";
+
+        public string ValueText { get; set; } = string.Empty;
+    }
+
+    private sealed class DraftScriptParameterEditor
+    {
+        public Guid RowId { get; init; } = Guid.NewGuid();
+
+        public string Name { get; set; } = string.Empty;
+
+        public bool Required { get; set; } = true;
+    }
+
+    private sealed class DraftSafetyFlagEditor
+    {
+        public Guid RowId { get; init; } = Guid.NewGuid();
+
+        public string Name { get; set; } = string.Empty;
+
+        public bool Value { get; set; }
+    }
+}

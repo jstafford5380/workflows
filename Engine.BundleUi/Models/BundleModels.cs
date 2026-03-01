@@ -45,6 +45,52 @@ public sealed record WorkflowDefinitionMetadata(
     string? Details,
     WorkflowInputSchema InputSchema);
 
+public sealed record WorkflowDraftSummary(
+    Guid DraftId,
+    string Name,
+    int Version,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
+public sealed record WorkflowDraft(
+    Guid DraftId,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt,
+    WorkflowDraftDefinition Definition);
+
+public sealed record WorkflowDraftDefinition(
+    string Name,
+    int Version,
+    string? Description,
+    string? Details,
+    WorkflowInputSchema InputSchema,
+    IReadOnlyList<WorkflowStepDraftDefinition> Steps);
+
+public sealed record WorkflowStepDraftDefinition(
+    string StepId,
+    string DisplayName,
+    string ActivityRef,
+    Dictionary<string, WorkflowInputBindingValue> Inputs,
+    IReadOnlyList<string> OutputsSchema,
+    RetryPolicyDraftDefinition RetryPolicy,
+    int? TimeoutSeconds,
+    WaitForEventDraftDefinition? WaitForEvent,
+    IReadOnlyList<ScriptParameterDraftDefinition> ScriptParameters,
+    bool AbortOnFail,
+    Dictionary<string, bool> SafetyMetadata);
+
+public sealed record WorkflowInputBindingValue(string? Binding, JsonNode? Literal);
+
+public sealed record RetryPolicyDraftDefinition(
+    int MaxAttempts,
+    int InitialDelaySeconds,
+    int MaxDelaySeconds,
+    double BackoffFactor);
+
+public sealed record WaitForEventDraftDefinition(string EventType, string CorrelationKeyExpression);
+
+public sealed record ScriptParameterDraftDefinition(string Name, bool Required);
+
 public sealed record WorkflowInputSchema(IReadOnlyList<WorkflowInputField> Fields)
 {
     public static WorkflowInputSchema Empty { get; } = new([]);

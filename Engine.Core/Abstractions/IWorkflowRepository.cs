@@ -10,4 +10,12 @@ public interface IWorkflowRepository
     Task<WorkflowDefinition?> GetDefinitionAsync(string workflowName, int? version, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<WorkflowDefinitionMetadata>> ListDefinitionsAsync(CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<WorkflowDraftSummary>> ListDraftsAsync(CancellationToken cancellationToken);
+
+    Task<WorkflowDraftRecord?> GetDraftAsync(Guid draftId, CancellationToken cancellationToken);
+
+    Task<WorkflowDraftSummary> SaveDraftAsync(Guid? draftId, WorkflowDefinition definition, CancellationToken cancellationToken);
+
+    Task<bool> DeleteDraftAsync(Guid draftId, CancellationToken cancellationToken);
 }

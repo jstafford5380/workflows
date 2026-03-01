@@ -12,6 +12,16 @@ public interface IWorkflowEngineService
 
     Task<WorkflowDefinition?> GetWorkflowDefinitionAsync(string workflowName, int? version, CancellationToken cancellationToken);
 
+    Task<IReadOnlyList<WorkflowDraftSummary>> ListWorkflowDraftsAsync(CancellationToken cancellationToken);
+
+    Task<WorkflowDraftRecord?> GetWorkflowDraftAsync(Guid draftId, CancellationToken cancellationToken);
+
+    Task<WorkflowDraftSummary> SaveWorkflowDraftAsync(Guid? draftId, WorkflowDefinition definition, CancellationToken cancellationToken);
+
+    Task<bool> DeleteWorkflowDraftAsync(Guid draftId, CancellationToken cancellationToken);
+
+    Task<WorkflowDefinitionMetadata> PublishWorkflowDraftAsync(Guid draftId, CancellationToken cancellationToken);
+
     Task<WorkflowInstanceChecklistView> StartWorkflowAsync(
         string workflowName,
         JsonObject inputs,

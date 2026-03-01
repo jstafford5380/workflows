@@ -46,6 +46,43 @@ public sealed class WorkflowEngineService : IWorkflowEngineService
         return _workflowRepository.GetDefinitionAsync(workflowName, version, cancellationToken);
     }
 
+    public Task<IReadOnlyList<WorkflowDraftSummary>> ListWorkflowDraftsAsync(CancellationToken cancellationToken)
+    {
+        return _workflowRepository.ListDraftsAsync(cancellationToken);
+    }
+
+    public Task<WorkflowDraftRecord?> GetWorkflowDraftAsync(Guid draftId, CancellationToken cancellationToken)
+    {
+        return _workflowRepository.GetDraftAsync(draftId, cancellationToken);
+    }
+
+    public async Task<WorkflowDraftSummary> SaveWorkflowDraftAsync(
+        Guid? draftId,
+        WorkflowDefinition definition,
+        CancellationToken cancellationToken)
+    {
+        var validation = WorkflowDefinitionValidator.Validate(definition);
+        if (!validation.IsValid)
+        {
+            throw new InvalidOperationException($"Invalid workflow draft: {string.Join("; ", validation.Errors)}");
+        }
+
+        return await _workflowRepository.SaveDraftAsync(draftId, definition, cancellationToken);
+    }
+
+    public Task<bool> DeleteWorkflowDraftAsync(Guid draftId, CancellationToken cancellationToken)
+    {
+        return _workflowRepository.DeleteDraftAsync(draftId, cancellationToken);
+    }
+
+    public async Task<WorkflowDefinitionMetadata> PublishWorkflowDraftAsync(Guid draftId, CancellationToken cancellationToken)
+    {
+        var draft = await _workflowRepository.GetDraftAsync(draftId, cancellationToken)
+            ?? throw new InvalidOperationException($"Workflow draft '{draftId}' was not found.");
+
+        return await RegisterWorkflowDefinitionAsync(draft.Definition, cancellationToken);
+    }
+
     public async Task<WorkflowInstanceChecklistView> StartWorkflowAsync(
         string workflowName,
         JsonObject inputs,

@@ -12,6 +12,8 @@ public sealed class WorkflowDbContext : DbContext
 
     public DbSet<WorkflowDefinitionEntity> WorkflowDefinitions => Set<WorkflowDefinitionEntity>();
 
+    public DbSet<WorkflowDraftEntity> WorkflowDrafts => Set<WorkflowDraftEntity>();
+
     public DbSet<WorkflowInstanceEntity> WorkflowInstances => Set<WorkflowInstanceEntity>();
 
     public DbSet<StepRunEntity> StepRuns => Set<StepRunEntity>();
@@ -39,6 +41,14 @@ public sealed class WorkflowDbContext : DbContext
             entity.Property(e => e.Name).HasMaxLength(200);
             entity.Property(e => e.Revision).HasDefaultValue(1);
             entity.Property(e => e.DefinitionJson).HasColumnType("text");
+        });
+
+        modelBuilder.Entity<WorkflowDraftEntity>(entity =>
+        {
+            entity.HasKey(e => e.DraftId);
+            entity.Property(e => e.Name).HasMaxLength(200);
+            entity.Property(e => e.DefinitionJson).HasColumnType("text");
+            entity.HasIndex(e => e.UpdatedAt);
         });
 
         modelBuilder.Entity<WorkflowInstanceEntity>(entity =>

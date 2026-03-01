@@ -12,6 +12,19 @@ public sealed record WorkflowDefinitionMetadata(
     string? Details,
     WorkflowInputSchemaDefinition InputSchema);
 
+public sealed record WorkflowDraftSummary(
+    Guid DraftId,
+    string Name,
+    int Version,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
+public sealed record WorkflowDraftRecord(
+    Guid DraftId,
+    WorkflowDefinition Definition,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
 public sealed record WorkflowInstanceRecord(
     Guid InstanceId,
     string WorkflowName,

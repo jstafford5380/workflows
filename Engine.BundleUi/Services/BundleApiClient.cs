@@ -48,6 +48,63 @@ public sealed class BundleApiClient
         return await HandleResponse<IReadOnlyList<WorkflowDefinitionMetadata>>(response, cancellationToken);
     }
 
+    public async Task<IReadOnlyList<WorkflowDraftSummary>> GetWorkflowDraftsAsync(CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.GetAsync("/workflow-drafts", cancellationToken);
+        return await HandleResponse<IReadOnlyList<WorkflowDraftSummary>>(response, cancellationToken);
+    }
+
+    public async Task<WorkflowDraft> GetWorkflowDraftAsync(Guid draftId, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.GetAsync($"/workflow-drafts/{draftId:D}", cancellationToken);
+        return await HandleResponse<WorkflowDraft>(response, cancellationToken);
+    }
+
+    public async Task<WorkflowDraftSummary> CreateWorkflowDraftAsync(WorkflowDraftDefinition definition, CancellationToken cancellationToken)
+    {
+        var payload = new JsonObject
+        {
+            ["definition"] = JsonNode.Parse(JsonSerializer.Serialize(definition, JsonOptions))
+        };
+
+        using var content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json");
+        using var response = await _httpClient.PostAsync("/workflow-drafts", content, cancellationToken);
+        return await HandleResponse<WorkflowDraftSummary>(response, cancellationToken);
+    }
+
+    public async Task<WorkflowDraftSummary> UpdateWorkflowDraftAsync(
+        Guid draftId,
+        WorkflowDraftDefinition definition,
+        CancellationToken cancellationToken)
+    {
+        var payload = new JsonObject
+        {
+            ["definition"] = JsonNode.Parse(JsonSerializer.Serialize(definition, JsonOptions))
+        };
+
+        using var content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json");
+        using var response = await _httpClient.PutAsync($"/workflow-drafts/{draftId:D}", content, cancellationToken);
+        return await HandleResponse<WorkflowDraftSummary>(response, cancellationToken);
+    }
+
+    public async Task DeleteWorkflowDraftAsync(Guid draftId, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.DeleteAsync($"/workflow-drafts/{draftId:D}", cancellationToken);
+        if (response.IsSuccessStatusCode)
+        {
+            return;
+        }
+
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        throw new InvalidOperationException($"API request failed ({(int)response.StatusCode}): {body}");
+    }
+
+    public async Task<WorkflowVersionPublishResult> PublishWorkflowDraftAsync(Guid draftId, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.PostAsync($"/workflow-drafts/{draftId:D}/publish", null, cancellationToken);
+        return await HandleResponse<WorkflowVersionPublishResult>(response, cancellationToken);
+    }
+
     public async Task<WorkflowInstanceChecklist> StartWorkflowInstanceAsync(
         string workflowName,
         JsonObject inputs,
@@ -137,4 +194,6 @@ public sealed class BundleApiClient
     }
 
     private sealed record ApiError(string Message);
+
+    public sealed record WorkflowVersionPublishResult(string Name, int Version, int Revision);
 }
